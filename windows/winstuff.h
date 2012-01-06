@@ -15,6 +15,8 @@
 
 #include "winhelp.h"
 
+#define SECURITY_WIN32
+
 struct Filename {
     char *path;
 };

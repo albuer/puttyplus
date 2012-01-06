@@ -7,6 +7,8 @@
 
 #include "putty.h"
 
+#define NO_SECURITY
+
 #ifndef NO_SECURITY
 #include <aclapi.h>
 #endif
@@ -86,7 +88,7 @@ DECL_WINDOWS_FUNCTION(static, BOOL, InitializeSecurityDescriptor,
 		      (PSECURITY_DESCRIPTOR, DWORD));
 DECL_WINDOWS_FUNCTION(static, BOOL, SetSecurityDescriptorOwner,
 		      (PSECURITY_DESCRIPTOR, PSID, BOOL));
-DECL_WINDOWS_FUNCTION(, DWORD, GetSecurityInfo,
+DECL_WINDOWS_FUNCTION(GLOBAL, DWORD, GetSecurityInfo,
 		      (HANDLE, SE_OBJECT_TYPE, SECURITY_INFORMATION,
 		       PSID *, PSID *, PACL *, PACL *,
 		       PSECURITY_DESCRIPTOR *));
