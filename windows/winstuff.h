@@ -175,6 +175,7 @@ typedef void *Ssh_gss_name;
  */
 GLOBAL HWND hwnd;	/* the main terminal window */
 GLOBAL HWND logbox;
+GLOBAL HWND findbox;
 
 /*
  * The all-important instance handle.

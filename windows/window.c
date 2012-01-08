@@ -41,6 +41,9 @@
 #define IDM_RECONF    0x0050
 #define IDM_CLRSB     0x0060
 #define IDM_RESET     0x0070
+#define IDM_CLRSS     0x0080
+#define IDM_STOP      0x0090
+#define IDM_FIND      0x0100
 #define IDM_HELP      0x0140
 #define IDM_ABOUT     0x0150
 #define IDM_SAVEDSESS 0x0160
@@ -280,6 +283,9 @@ static void start_backend(void)
      */
     for (i = 0; i < lenof(popup_menus); i++) {
 	DeleteMenu(popup_menus[i].menu, IDM_RESTART, MF_BYCOMMAND);
+    DeleteMenu(popup_menus[i].menu, IDM_STOP, MF_BYCOMMAND);
+    InsertMenu(popup_menus[i].menu, IDM_DUPSESS, MF_BYCOMMAND | MF_ENABLED,
+           IDM_STOP, "Stop Session");
     }
 
     must_close_session = FALSE;
@@ -316,6 +322,7 @@ static void close_session(void)
 	DeleteMenu(popup_menus[i].menu, IDM_RESTART, MF_BYCOMMAND);
 	InsertMenu(popup_menus[i].menu, IDM_DUPSESS, MF_BYCOMMAND | MF_ENABLED,
 		   IDM_RESTART, "&Restart Session");
+    DeleteMenu(popup_menus[i].menu, IDM_STOP, MF_BYCOMMAND);
     }
 
     /*
@@ -798,6 +805,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 	    AppendMenu(m, MF_ENABLED, IDM_COPYALL, "C&opy All to Clipboard");
 	    AppendMenu(m, MF_ENABLED, IDM_CLRSB, "C&lear Scrollback");
 	    AppendMenu(m, MF_ENABLED, IDM_RESET, "Rese&t Terminal");
+	    AppendMenu(m, MF_ENABLED, IDM_CLRSS, "Clear Screen and Scrollback");
+	    AppendMenu(m, MF_ENABLED, IDM_FIND, "&Find");
 	    AppendMenu(m, MF_SEPARATOR, 0, 0);
 	    AppendMenu(m, (conf_get_int(conf, CONF_resize_action)
 			   == RESIZE_DISABLED) ? MF_GRAYED : MF_ENABLED,
@@ -855,7 +864,8 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 	    if (msg.message == WM_QUIT)
 		goto finished;	       /* two-level break */
 
-	    if (!(IsWindow(logbox) && IsDialogMessage(logbox, &msg)))
+	    if (!(IsWindow(logbox) && IsDialogMessage(logbox, &msg))
+            && !(IsWindow(findbox) && IsDialogMessage(findbox, &msg)))
 		DispatchMessage(&msg);
 	    /* Send the paste buffer if there's anything to send */
 	    term_paste(term);
@@ -2079,6 +2089,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 	  case IDM_SHOWLOG:
 	    showeventlog(hwnd);
 	    break;
+        case IDM_FIND:
+            showfind(hwnd);
+            break;
 	  case IDM_NEWSESS:
 	  case IDM_DUPSESS:
 	  case IDM_SAVEDSESS:
@@ -2357,6 +2370,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 	    if (ldisc)
 		ldisc_send(ldisc, NULL, 0, 0);
 	    break;
+        case IDM_CLRSS:
+            term_pwron(term, TRUE);
+            if (ldisc)
+                ldisc_send(ldisc, NULL, 0, 0);
+            term_clrsb(term);
+            break;
+        case IDM_STOP:
+            close_session();
+            break;
 	  case IDM_ABOUT:
 	    showabout(hwnd);
 	    break;
@@ -4427,6 +4449,9 @@ static int TranslateKey(UINT message, WPARAM wParam, LPARAM lParam,
 	if (wParam == VK_RETURN) {     /* Return */
 	    *p++ = 0x0D;
 	    *p++ = 0;
+        
+        if (session_closed)
+            SendMessage(hwnd, WM_COMMAND, IDM_RESTART, 0);
 	    return -2;
 	}
 

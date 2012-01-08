@@ -229,6 +229,37 @@ static int CALLBACK AboutProc(HWND hwnd, UINT msg,
     return 0;
 }
 
+static int CALLBACK FindProc(HWND hwnd, UINT msg,
+			    WPARAM wParam, LPARAM lParam)
+{
+    int i;
+
+    switch (msg) {
+    case WM_INITDIALOG:
+        return 1;
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case IDOK:
+        case IDCANCEL:
+            findbox = NULL;
+            SetActiveWindow(GetParent(hwnd));
+            DestroyWindow(hwnd);
+            return 0;
+//        case ID_BTN_FIND:
+            if (HIWORD(wParam) == BN_CLICKED ||
+            HIWORD(wParam) == BN_DOUBLECLICKED) {}
+            return 0;
+        }
+        return 0;
+    case WM_CLOSE:
+        findbox = NULL;
+        SetActiveWindow(GetParent(hwnd));
+        DestroyWindow(hwnd);
+        return 0;
+    }
+    return 0;
+}
+
 static int SaneDialogBox(HINSTANCE hinst,
 			 LPCTSTR tmpl,
 			 HWND hwndparent,
@@ -743,6 +774,16 @@ void showeventlog(HWND hwnd)
 void showabout(HWND hwnd)
 {
     DialogBox(hinst, MAKEINTRESOURCE(IDD_ABOUTBOX), hwnd, AboutProc);
+}
+
+void showfind(HWND hwnd)
+{
+    if (!findbox) {
+	findbox = CreateDialog(hinst, MAKEINTRESOURCE(IDD_ABOUTBOX/*IDD_FINDBOX*/),
+			      hwnd, FindProc);
+	ShowWindow(findbox, SW_SHOWNORMAL);
+    }
+    SetActiveWindow(findbox);
 }
 
 int verify_ssh_host_key(void *frontend, char *host, int port, char *keytype,
