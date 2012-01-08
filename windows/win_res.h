@@ -32,7 +32,7 @@
 #define IDC_HELPBTN     1005
 #define IDC_ABOUT       1006
 
-#define IDC_EDIT1       1007
+#define IDC_EDIT_FIND   1007
 #define ID_BTN_FIND     1008
 
 #endif

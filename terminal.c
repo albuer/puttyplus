@@ -5441,6 +5441,230 @@ void term_copyall(Terminal *term)
 }
 
 /*
+ * Helper routine for term_find(): growing buffer.
+ */
+typedef struct {
+    int buflen;		    /* amount of allocated space in textbuf/posbuf */
+    int bufpos;		    /* amount of actual data */
+    wchar_t *textbuf;	    /* buffer for copied text */
+    wchar_t *textptr;	    /* = textbuf + bufpos (current insertion point) */
+    int *posbuf;	    /* buffer for copied postion */
+    int *posptr;	    /* = posbuf + bufpos */
+} find_workbuf;
+
+static void find_addchar(find_workbuf *b, wchar_t chr, int pos)
+{
+    if (b->bufpos >= b->buflen) {
+    	b->buflen += 128;
+    	b->textbuf = sresize(b->textbuf, b->buflen, wchar_t);
+    	b->textptr = b->textbuf + b->bufpos;
+    	b->posbuf = sresize(b->posbuf, b->buflen, int);
+    	b->posptr = b->posbuf + b->bufpos;
+    }
+    *b->textptr++ = chr;
+    *b->posptr++ = pos;
+    b->bufpos++;
+}
+
+static void find_initbuf(find_workbuf *b)
+{
+    b->textptr = b->textbuf;
+    memset(b->textbuf, 0, b->buflen*sizeof(wchar_t));
+    b->posptr = b->posbuf;
+    memset(b->posbuf, 0, b->buflen*sizeof(int));
+    b->bufpos = 0;
+}
+
+static int find_get_range(find_workbuf *buf, wchar_t* str_find, int* begin, int* end)
+{
+    wchar_t *p = wcsstr(buf->textbuf, str_find);
+    if( !p )
+        return -1;
+    *begin = buf->posbuf[p-buf->textbuf];
+    *end = buf->posbuf[p-buf->textbuf+wcslen(str_find)-1]+1;
+    
+    return 0;
+}
+
+void find_string(Terminal *term, pos top, pos bottom, int reserve, wchar_t* str_find)
+{
+    find_workbuf buf;
+
+    buf.buflen = 256;
+    buf.textptr = buf.textbuf = snewn(buf.buflen, wchar_t);
+    buf.posptr = buf.posbuf = snewn(buf.buflen, int);
+    find_initbuf(&buf);
+
+    while (poslt(top, bottom)) {
+    	termline *ldata = lineptr(top.y);
+	    pos nlpos;
+
+    	/*
+    	 * nlpos will point at the maximum position on this line we
+    	 * should copy up to. So we start it at the end of the
+    	 * line...
+    	 */
+    	nlpos.y = top.y;
+    	nlpos.x = term->cols;
+
+    	/*
+    	 * ... move it backwards if there's unused space at the end
+    	 * of the line (and also set `nl' if this is the case,
+    	 * because in normal selection mode this means we need a
+    	 * newline at the end)...
+    	 */
+    	if (!(ldata->lattr & LATTR_WRAPPED)) {
+    	    while (nlpos.x &&
+    		   IS_SPACE_CHR(ldata->chars[nlpos.x - 1].chr) &&
+    		   !ldata->chars[nlpos.x - 1].cc_next &&
+    		   poslt(top, nlpos))
+                decpos(nlpos);
+    	} else if (ldata->lattr & LATTR_WRAPPED2) {
+    	    /* Ignore the last char on the line in a WRAPPED2 line. */
+    	    decpos(nlpos);
+    	}
+
+    	while (poslt(top, bottom) && poslt(top, nlpos)) {
+    	    wchar_t cbuf[16], *p;
+    	    int c;
+    	    int x = top.x;
+
+    	    if (ldata->chars[x].chr == UCSWIDE) {
+        		top.x++;
+        		continue;
+    	    }
+
+    	    while (1) {
+                int uc = ldata->chars[x].chr;
+
+        		switch (uc & CSET_MASK) {
+                case CSET_LINEDRW:
+                    if (!term->rawcnp) {
+                    uc = term->ucsdata->unitab_xterm[uc & 0xFF];
+                    break;
+                    }
+                case CSET_ASCII:
+                    uc = term->ucsdata->unitab_line[uc & 0xFF];
+                    break;
+                case CSET_SCOACS:
+                    uc = term->ucsdata->unitab_scoacs[uc&0xFF];
+                    break;
+        		}
+                switch (uc & CSET_MASK) {
+                case CSET_ACP:
+                    uc = term->ucsdata->unitab_font[uc & 0xFF];
+                    break;
+                case CSET_OEMCP:
+                    uc = term->ucsdata->unitab_oemcp[uc & 0xFF];
+                    break;
+                }
+
+        		c = (uc & ~CSET_MASK);
+#ifdef PLATFORM_IS_UTF16
+        		if (uc > 0x10000 && uc < 0x110000) {
+        		    cbuf[0] = 0xD800 | ((uc - 0x10000) >> 10);
+        		    cbuf[1] = 0xDC00 | ((uc - 0x10000) & 0x3FF);
+        		    cbuf[2] = 0;
+        		} else
+#endif
+        		{
+        		    cbuf[0] = uc;
+        		    cbuf[1] = 0;
+        		}
+
+        		if (DIRECT_FONT(uc)) {
+        		    if (c >= ' ' && c != 0x7F) {
+            			char buf[4];
+            			WCHAR wbuf[4];
+            			int rv;
+            			if (is_dbcs_leadbyte(term->ucsdata->font_codepage, (BYTE) c)) {
+            			    buf[0] = c;
+            			    buf[1] = (char) (0xFF & ldata->chars[top.x + 1].chr);
+            			    rv = mb_to_wc(term->ucsdata->font_codepage, 0, buf, 2, wbuf, 4);
+            			    top.x++;
+            			} else {
+            			    buf[0] = c;
+            			    rv = mb_to_wc(term->ucsdata->font_codepage, 0, buf, 1, wbuf, 4);
+            			}
+
+            			if (rv > 0) {
+            			    memcpy(cbuf, wbuf, rv * sizeof(wchar_t));
+            			    cbuf[rv] = 0;
+            			}
+        		    }
+        		}
+
+        		for (p = cbuf; *p; p++)
+        		    find_addchar(&buf, *p, top.x);
+
+        		if (ldata->chars[x].cc_next)
+        		    x += ldata->chars[x].cc_next;
+        		else
+        		    break;
+    	    }
+    	    top.x++;
+    	}
+
+    	unlineptr(ldata);
+
+        {
+            int begin, end;
+            if( !find_get_range(&buf, str_find, &begin, &end) )
+            {
+                term->selstart.y = term->selend.y = top.y;
+                term->selstart.x = begin;
+                term->selend.x = end;
+                term->selstate = SELECTED;
+                term_update(term);
+				break;
+            }
+        }
+
+        find_initbuf(&buf);
+        
+        top.y++;
+    	top.x = 0;
+    }
+    sfree(buf.textbuf);
+    sfree(buf.posbuf);
+}
+
+void term_find(Terminal *term, int reserve, wchar_t* str_find)
+{
+    pos top;
+    pos bottom;
+    tree234 *screen = term->screen;
+
+    if(term->selstart.x==0 && term->selstart.y==0
+        && term->selend.x==0 && term->selend.y==0)
+    {
+        top.y = -sblines(term);
+        top.x = 0;
+        bottom.y = find_last_nonempty_line(term, screen);
+        bottom.x = term->cols;
+    }
+    else
+    {
+        if(reserve)
+        {
+            top.y = -sblines(term);
+            top.x = 0;
+            bottom.y = term->selend.y;
+            bottom.x = term->selend.x-1;
+        }
+        else
+        {
+            top.y = term->selstart.y;
+            top.x = term->selstart.x+1;
+            bottom.y = find_last_nonempty_line(term, screen);
+            bottom.x = term->cols;
+        }
+    }
+    
+    find_string(term, top, bottom, reserve, str_find);
+}
+
+/*
  * The wordness array is mainly for deciding the disposition of the
  * US-ASCII characters.
  */
@@ -6687,4 +6911,6 @@ int term_get_userpass_input(Terminal *term, prompts_t *p,
 	p->data = NULL;
 	return +1; /* all done */
     }
+}
+
 }

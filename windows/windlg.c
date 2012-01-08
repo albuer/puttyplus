@@ -246,8 +246,13 @@ static int CALLBACK FindProc(HWND hwnd, UINT msg,
             DestroyWindow(hwnd);
             return 0;
         case ID_BTN_FIND:
-            if (HIWORD(wParam) == BN_CLICKED ||
-            HIWORD(wParam) == BN_DOUBLECLICKED) {}
+			{
+            char strFind[512];
+            wchar_t wstrFind[512];
+            GetDlgItemText(hwnd, IDC_EDIT_FIND, strFind, 511);
+            MultiByteToWideChar(CP_ACP, NULL, strFind, 511, wstrFind, 511);
+            term_find(term, 0, wstrFind);
+			}
             return 0;
         }
         return 0;
