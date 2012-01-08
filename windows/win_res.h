@@ -13,6 +13,7 @@
 #define IDD_ABOUTBOX     111
 #define IDD_RECONF       112
 #define IDD_LICENCEBOX   113
+#define IDD_FINDBOX      114
 
 #define IDN_LIST        1001
 #define IDN_COPY        1002
@@ -30,5 +31,8 @@
 #define IDC_TABLIST     1004
 #define IDC_HELPBTN     1005
 #define IDC_ABOUT       1006
+
+#define IDC_EDIT1       1007
+#define ID_BTN_FIND     1008
 
 #endif

@@ -245,7 +245,7 @@ static int CALLBACK FindProc(HWND hwnd, UINT msg,
             SetActiveWindow(GetParent(hwnd));
             DestroyWindow(hwnd);
             return 0;
-//        case ID_BTN_FIND:
+        case ID_BTN_FIND:
             if (HIWORD(wParam) == BN_CLICKED ||
             HIWORD(wParam) == BN_DOUBLECLICKED) {}
             return 0;
@@ -779,7 +779,7 @@ void showabout(HWND hwnd)
 void showfind(HWND hwnd)
 {
     if (!findbox) {
-	findbox = CreateDialog(hinst, MAKEINTRESOURCE(IDD_ABOUTBOX/*IDD_FINDBOX*/),
+	findbox = CreateDialog(hinst, MAKEINTRESOURCE(IDD_FINDBOX),
 			      hwnd, FindProc);
 	ShowWindow(findbox, SW_SHOWNORMAL);
     }
