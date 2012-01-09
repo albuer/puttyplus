@@ -34,5 +34,11 @@
 
 #define IDC_EDIT_FIND   1007
 #define ID_BTN_FIND     1008
+#define IDC_CHK_CASE                    1009
+#define IDC_CHK_WHOLE                   1010
+#define IDC_RADIO_FORWARD               1011
+#define IDC_RADIO_BACKWARD              1012
+
+#define IDC_STATIC                      -1
 
 #endif

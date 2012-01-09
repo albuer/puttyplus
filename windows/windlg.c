@@ -233,10 +233,14 @@ static int CALLBACK FindProc(HWND hwnd, UINT msg,
 			    WPARAM wParam, LPARAM lParam)
 {
     int i;
+    HWND ctrl;
 
     switch (msg) {
     case WM_INITDIALOG:
-        return 1;
+        CheckRadioButton(hwnd, IDC_RADIO_FORWARD, IDC_RADIO_BACKWARD, IDC_RADIO_FORWARD);
+        SetFocus(GetDlgItem(hwnd, IDC_EDIT_FIND));
+        ShowWindow(GetDlgItem(hwnd, IDC_CHK_WHOLE), SW_HIDE);
+        return 0;
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
         case IDOK:
@@ -249,9 +253,17 @@ static int CALLBACK FindProc(HWND hwnd, UINT msg,
 			{
             char strFind[512];
             wchar_t wstrFind[512];
+            int match_case = (BST_CHECKED==IsDlgButtonChecked(hwnd, IDC_CHK_CASE));
+            int match_whole = (BST_CHECKED==IsDlgButtonChecked(hwnd, IDC_CHK_WHOLE));
+            int backward = (BST_CHECKED==IsDlgButtonChecked(hwnd, IDC_RADIO_BACKWARD));
             GetDlgItemText(hwnd, IDC_EDIT_FIND, strFind, 511);
             MultiByteToWideChar(CP_ACP, NULL, strFind, 511, wstrFind, 511);
-            term_find(term, 0, wstrFind);
+            if(!term_find(term, wstrFind, backward, match_case, match_whole))
+            {
+                char msg_text[530];
+                sprintf(msg_text, "Can not find \"%s\"", strFind);
+                MessageBox(hwnd, msg_text, "Find", MB_OK|MB_ICONINFORMATION);
+            }
 			}
             return 0;
         }

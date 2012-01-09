@@ -5475,20 +5475,60 @@ static void find_initbuf(find_workbuf *b)
     b->bufpos = 0;
 }
 
-static int find_get_range(find_workbuf *buf, wchar_t* str_find, int* begin, int* end)
+static int is_whole_word_only(wchar_t l, wchar_t r)
 {
-    wchar_t *p = wcsstr(buf->textbuf, str_find);
+    if( iswdigit(l) || iswdigit(r)
+        || iswalpha(l) || iswalpha(r) )
+        return 0;
+
+    return 1;
+}
+
+static int find_get_range(find_workbuf *buf, wchar_t* str_find, 
+    int backward, int match_case, int match_whole, int* begin, int* end)
+{
+    wchar_t *p = NULL;
+    wchar_t *textbuf = buf->textbuf;
+
+    while( p==NULL && (textbuf-buf->textbuf)<wcslen(buf->textbuf) )
+    {
+        if(match_case)
+            p = wcsstr(textbuf, str_find);
+        else
+        {
+            wchar_t * b = _wcslwr(textbuf);
+            wchar_t * f = _wcslwr(str_find);
+            p = wcsstr(b, f);
+        }
+
+        if(p && match_whole)
+        {
+            wchar_t l = (p==buf->textbuf)?0:*(p-1);
+            wchar_t r = *(p+wcslen(str_find));//*(p+wcslen(str_find))==0?0:*(p+wcslen(str_find)+1);
+            if(!is_whole_word_only(l, r))
+            {
+                textbuf = p+1;
+                p = NULL;
+            }
+        }
+        else
+            break;
+    }
+         
     if( !p )
         return -1;
+    
     *begin = buf->posbuf[p-buf->textbuf];
     *end = buf->posbuf[p-buf->textbuf+wcslen(str_find)-1]+1;
     
     return 0;
 }
 
-void find_string(Terminal *term, pos top, pos bottom, int reserve, wchar_t* str_find)
+int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
+            int backward, int match_case, int match_whole)
 {
     find_workbuf buf;
+    int is_find = 0;
 
     buf.buflen = 256;
     buf.textptr = buf.textbuf = snewn(buf.buflen, wchar_t);
@@ -5609,13 +5649,17 @@ void find_string(Terminal *term, pos top, pos bottom, int reserve, wchar_t* str_
 
         {
             int begin, end;
-            if( !find_get_range(&buf, str_find, &begin, &end) )
+            if( !find_get_range(&buf, str_find, backward, match_case, 
+                        match_whole, &begin, &end) )
             {
                 term->selstart.y = term->selend.y = top.y;
                 term->selstart.x = begin;
                 term->selend.x = end;
                 term->selstate = SELECTED;
+                term_scroll_to_selection(term, 0);
                 term_update(term);
+
+                is_find = 1;
 				break;
             }
         }
@@ -5627,9 +5671,12 @@ void find_string(Terminal *term, pos top, pos bottom, int reserve, wchar_t* str_
     }
     sfree(buf.textbuf);
     sfree(buf.posbuf);
+
+    return is_find;
 }
 
-void term_find(Terminal *term, int reserve, wchar_t* str_find)
+void term_find(Terminal *term, wchar_t* str_find, 
+                int backward, int match_case, int match_whole)
 {
     pos top;
     pos bottom;
@@ -5645,7 +5692,7 @@ void term_find(Terminal *term, int reserve, wchar_t* str_find)
     }
     else
     {
-        if(reserve)
+        if(backward)
         {
             top.y = -sblines(term);
             top.x = 0;
@@ -5661,7 +5708,7 @@ void term_find(Terminal *term, int reserve, wchar_t* str_find)
         }
     }
     
-    find_string(term, top, bottom, reserve, str_find);
+    find_string(term, top, bottom, str_find, backward, match_case, match_whole);
 }
 
 /*
@@ -6913,4 +6960,3 @@ int term_get_userpass_input(Terminal *term, prompts_t *p,
     }
 }
 
-}
