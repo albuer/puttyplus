@@ -4245,6 +4245,25 @@ static int TranslateKey(UINT message, WPARAM wParam, LPARAM lParam,
 	    return p - output;
 	}
 
+    if(shift_state == 3)
+    {
+        switch(wParam)
+        {
+        case 'F':
+            SendMessage(hwnd, WM_COMMAND, IDM_FIND, 0);
+            break;
+        case 'S':
+            SendMessage(hwnd, WM_COMMAND, session_closed?IDM_RESTART:IDM_STOP, 0);
+            break;
+        case 'Z':
+            SendMessage(hwnd, WM_COMMAND, IDM_CLRSS, 0);
+            break;
+        case 'A':
+            SendMessage(hwnd, WM_COMMAND, IDM_COPYALL, 0);
+            break;
+        }
+    }
+
 	/*
 	 * Next, all the keys that do tilde codes. (ESC '[' nn '~',
 	 * for integer decimal nn.)
