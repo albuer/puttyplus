@@ -1578,6 +1578,8 @@ Terminal *term_init(Conf *myconf, struct unicode_data *ucsdata,
     term->basic_erase_char.cc_next = 0;
     term->erase_char = term->basic_erase_char;
 
+    term->ldisc = NULL;
+
     return term;
 }
 

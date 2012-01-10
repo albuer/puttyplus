@@ -119,9 +119,9 @@ static int caret_x = -1, caret_y = -1;
 
 static int kbd_codepage;
 
-static void *ldisc;
-static Backend *back;
-static void *backhandle;
+static void *ldisc = NULL;
+static Backend *back = NULL;
+static void *backhandle = NULL;
 
 static struct unicode_data ucsdata;
 static int must_close_session, session_closed;
@@ -219,6 +219,8 @@ char *get_ttymode(void *frontend, const char *mode)
     return term_get_ttymode(term, mode);
 }
 
+static void close_session(void);
+
 static void start_backend(void)
 {
     const char *error;
@@ -245,15 +247,17 @@ static void start_backend(void)
 		       &realhost,
 		       conf_get_int(conf, CONF_tcp_nodelay),
 		       conf_get_int(conf, CONF_tcp_keepalives));
-    back->provide_logctx(backhandle, logctx);
     if (error) {
 	char *str = dupprintf("%s Error", appname);
 	sprintf(msg, "Unable to open connection to\n"
 		"%.800s\n" "%s", conf_dest(conf), error);
 	MessageBox(NULL, msg, str, MB_ICONERROR | MB_OK);
 	sfree(str);
-	exit(0);
+
+    close_session();
+    return;
     }
+    back->provide_logctx(backhandle, logctx);
     window_name = icon_name = NULL;
     title = conf_get_str(conf, CONF_wintitle);
     if (!*title) {
@@ -2377,7 +2381,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
             term_clrsb(term);
             break;
         case IDM_STOP:
-        	if( IDYES == MessageBox(NULL, "Are you sure you want to stop this session?", appname, MB_ICONWARNING | MB_YESNO) )
+        	if( IDYES == MessageBox(hwnd, "Are you sure you want to stop this session?", appname, MB_ICONWARNING | MB_YESNO) )
                 close_session();
             break;
 	  case IDM_ABOUT:
