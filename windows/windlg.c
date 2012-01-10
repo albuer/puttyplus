@@ -239,7 +239,6 @@ static int CALLBACK FindProc(HWND hwnd, UINT msg,
     case WM_INITDIALOG:
         CheckRadioButton(hwnd, IDC_RADIO_FORWARD, IDC_RADIO_BACKWARD, IDC_RADIO_FORWARD);
         SetFocus(GetDlgItem(hwnd, IDC_EDIT_FIND));
-        ShowWindow(GetDlgItem(hwnd, IDC_CHK_WHOLE), SW_HIDE);
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wParam)) {
@@ -248,24 +247,24 @@ static int CALLBACK FindProc(HWND hwnd, UINT msg,
             findbox = NULL;
             SetActiveWindow(GetParent(hwnd));
             DestroyWindow(hwnd);
-            return 0;
+            break;
         case ID_BTN_FIND:
-			{
-            char strFind[512];
-            wchar_t wstrFind[512];
-            int match_case = (BST_CHECKED==IsDlgButtonChecked(hwnd, IDC_CHK_CASE));
-            int match_whole = (BST_CHECKED==IsDlgButtonChecked(hwnd, IDC_CHK_WHOLE));
-            int backward = (BST_CHECKED==IsDlgButtonChecked(hwnd, IDC_RADIO_BACKWARD));
-            GetDlgItemText(hwnd, IDC_EDIT_FIND, strFind, 511);
-            MultiByteToWideChar(CP_ACP, NULL, strFind, 511, wstrFind, 511);
-            if(!term_find(term, wstrFind, backward, match_case, match_whole))
-            {
-                char msg_text[530];
-                sprintf(msg_text, "Can not find \"%s\"", strFind);
-                MessageBox(hwnd, msg_text, "Find", MB_OK|MB_ICONINFORMATION);
-            }
-			}
-            return 0;
+    		{
+                char strFind[512];
+                wchar_t wstrFind[512];
+                int match_case = (BST_CHECKED==IsDlgButtonChecked(hwnd, IDC_CHK_CASE));
+                int match_whole = (BST_CHECKED==IsDlgButtonChecked(hwnd, IDC_CHK_WHOLE));
+                int backward = (BST_CHECKED==IsDlgButtonChecked(hwnd, IDC_RADIO_BACKWARD));
+                GetDlgItemText(hwnd, IDC_EDIT_FIND, strFind, 511);
+                MultiByteToWideChar(CP_ACP, NULL, strFind, 511, wstrFind, 511);
+                if(!term_find(term, wstrFind, backward, match_case, match_whole))
+                {
+                    char msg_text[530];
+                    sprintf(msg_text, "Can not find \"%s\"", strFind);
+                    MessageBox(hwnd, msg_text, "Find", MB_OK|MB_ICONINFORMATION);
+                }
+    		}
+            break;
         }
         return 0;
     case WM_CLOSE:
@@ -796,9 +795,9 @@ void showabout(HWND hwnd)
 void showfind(HWND hwnd)
 {
     if (!findbox) {
-	findbox = CreateDialog(hinst, MAKEINTRESOURCE(IDD_FINDBOX),
-			      hwnd, FindProc);
-	ShowWindow(findbox, SW_SHOWNORMAL);
+    	findbox = CreateDialog(hinst, MAKEINTRESOURCE(IDD_FINDBOX),
+    			      hwnd, FindProc);
+    	ShowWindow(findbox, SW_SHOWNORMAL);
     }
     SetActiveWindow(findbox);
 }

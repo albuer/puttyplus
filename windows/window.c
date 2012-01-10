@@ -2377,7 +2377,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
             term_clrsb(term);
             break;
         case IDM_STOP:
-            close_session();
+        	if( IDYES == MessageBox(NULL, "Are you sure you want to stop this session?", appname, MB_ICONWARNING | MB_YESNO) )
+                close_session();
             break;
 	  case IDM_ABOUT:
 	    showabout(hwnd);
@@ -4010,6 +4011,32 @@ static int TranslateKey(UINT message, WPARAM wParam, LPARAM lParam,
 	if (left_alt)
 	    *p++ = '\033';
 
+    // hotkey process
+    if(shift_state == 3)
+    {
+        int hotkey = 0;
+        switch(wParam)
+        {
+        case 'F':
+            SendMessage(hwnd, WM_COMMAND, IDM_FIND, 0);
+            hotkey = 1;
+            break;
+        case 'S':
+            SendMessage(hwnd, WM_COMMAND, session_closed?IDM_RESTART:IDM_STOP, 0);
+            hotkey = 1;
+            break;
+        case 'Z':
+            SendMessage(hwnd, WM_COMMAND, IDM_CLRSS, 0);
+            hotkey = 1;
+            break;
+        case 'A':
+            SendMessage(hwnd, WM_COMMAND, IDM_COPYALL, 0);
+            hotkey = 1;
+            break;
+        }
+        if (hotkey) return -1;
+    }
+
 	/* Lets see if it's a pattern we know all about ... */
 	if (wParam == VK_PRIOR && shift_state == 1) {
 	    SendMessage(hwnd, WM_VSCROLL, SB_PAGEUP, 0);
@@ -4244,25 +4271,6 @@ static int TranslateKey(UINT message, WPARAM wParam, LPARAM lParam,
 	    *p++ = '\n';
 	    return p - output;
 	}
-
-    if(shift_state == 3)
-    {
-        switch(wParam)
-        {
-        case 'F':
-            SendMessage(hwnd, WM_COMMAND, IDM_FIND, 0);
-            break;
-        case 'S':
-            SendMessage(hwnd, WM_COMMAND, session_closed?IDM_RESTART:IDM_STOP, 0);
-            break;
-        case 'Z':
-            SendMessage(hwnd, WM_COMMAND, IDM_CLRSS, 0);
-            break;
-        case 'A':
-            SendMessage(hwnd, WM_COMMAND, IDM_COPYALL, 0);
-            break;
-        }
-    }
 
 	/*
 	 * Next, all the keys that do tilde codes. (ESC '[' nn '~',
