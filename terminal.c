@@ -5489,35 +5489,49 @@ static int find_get_range(find_workbuf *buf, wchar_t* str_find,
 {
     wchar_t *p = NULL;
     wchar_t *textbuf = buf->textbuf;
+    wchar_t *last = NULL;
 
-    while( p==NULL && (textbuf-buf->textbuf)<wcslen(buf->textbuf) )
+    if(!match_case)
     {
-        if(match_case)
-            p = wcsstr(textbuf, str_find);
-        else
-        {
-            wchar_t * b = _wcslwr(textbuf);
-            wchar_t * f = _wcslwr(str_find);
-            p = wcsstr(b, f);
-        }
-
-        if(p && match_whole)
-        {
-            wchar_t l = (p==buf->textbuf)?0:*(p-1);
-            wchar_t r = *(p+wcslen(str_find));//*(p+wcslen(str_find))==0?0:*(p+wcslen(str_find)+1);
-            if(!is_whole_word_only(l, r))
-            {
-                textbuf = p+1;
-                p = NULL;
-            }
-        }
-        else
-            break;
+        _wcslwr(textbuf);
+        _wcslwr(str_find);
     }
-         
-    if( !p )
-        return -1;
+
+    do {
+        while( p==NULL && (textbuf-buf->textbuf)<buf->bufpos )
+        {
+            p = wcsstr(textbuf, str_find);
+
+            if(p && match_whole)
+            {
+                wchar_t l = (p==buf->textbuf)?0:*(p-1);
+                wchar_t r = *(p+wcslen(str_find));
+                if(!is_whole_word_only(l, r))
+                {
+                    textbuf = p+1;
+                    p = NULL;
+                }
+            }
+            else
+                break;
+        }
+             
+        if( !p && !last )
+            return -1;
+        else if(!p)
+        {
+            break;
+        }
+        else
+        {
+            textbuf = p+1;
+            last = p;
+            p = NULL;
+        }
+    } while(backward);
     
+    p = last;
+
     *begin = buf->posbuf[p-buf->textbuf];
     *end = buf->posbuf[p-buf->textbuf+wcslen(str_find)-1]+1;
     
@@ -5529,6 +5543,8 @@ int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
 {
     find_workbuf buf;
     int is_find = 0;
+    pos curline = backward?bottom:top;
+    curline.x = backward?0:top.x;
 
     buf.buflen = 256;
     buf.textptr = buf.textbuf = snewn(buf.buflen, wchar_t);
@@ -5536,7 +5552,7 @@ int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
     find_initbuf(&buf);
 
     while (poslt(top, bottom)) {
-    	termline *ldata = lineptr(top.y);
+    	termline *ldata = lineptr(curline.y);
 	    pos nlpos;
 
     	/*
@@ -5544,8 +5560,8 @@ int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
     	 * should copy up to. So we start it at the end of the
     	 * line...
     	 */
-    	nlpos.y = top.y;
-    	nlpos.x = term->cols;
+    	nlpos.y = curline.y;
+    	nlpos.x = backward?bottom.x:term->cols;
 
     	/*
     	 * ... move it backwards if there's unused space at the end
@@ -5557,20 +5573,20 @@ int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
     	    while (nlpos.x &&
     		   IS_SPACE_CHR(ldata->chars[nlpos.x - 1].chr) &&
     		   !ldata->chars[nlpos.x - 1].cc_next &&
-    		   poslt(top, nlpos))
+    		   poslt(curline, nlpos))
                 decpos(nlpos);
     	} else if (ldata->lattr & LATTR_WRAPPED2) {
     	    /* Ignore the last char on the line in a WRAPPED2 line. */
     	    decpos(nlpos);
     	}
 
-    	while (poslt(top, bottom) && poslt(top, nlpos)) {
+    	while (poslt(top, bottom) && poslt(curline, nlpos)) {
     	    wchar_t cbuf[16], *p;
     	    int c;
-    	    int x = top.x;
+    	    int x = curline.x;
 
     	    if (ldata->chars[x].chr == UCSWIDE) {
-        		top.x++;
+        		curline.x++;
         		continue;
     	    }
 
@@ -5619,9 +5635,9 @@ int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
             			int rv;
             			if (is_dbcs_leadbyte(term->ucsdata->font_codepage, (BYTE) c)) {
             			    buf[0] = c;
-            			    buf[1] = (char) (0xFF & ldata->chars[top.x + 1].chr);
+            			    buf[1] = (char) (0xFF & ldata->chars[curline.x + 1].chr);
             			    rv = mb_to_wc(term->ucsdata->font_codepage, 0, buf, 2, wbuf, 4);
-            			    top.x++;
+            			    curline.x++;
             			} else {
             			    buf[0] = c;
             			    rv = mb_to_wc(term->ucsdata->font_codepage, 0, buf, 1, wbuf, 4);
@@ -5635,24 +5651,24 @@ int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
         		}
 
         		for (p = cbuf; *p; p++)
-        		    find_addchar(&buf, *p, top.x);
+        		    find_addchar(&buf, *p, curline.x);
 
         		if (ldata->chars[x].cc_next)
         		    x += ldata->chars[x].cc_next;
         		else
         		    break;
     	    }
-    	    top.x++;
+    	    curline.x++;
     	}
 
     	unlineptr(ldata);
 
-        {
+        if(buf.bufpos>0){
             int begin, end;
             if( !find_get_range(&buf, str_find, backward, match_case, 
                         match_whole, &begin, &end) )
             {
-                term->selstart.y = term->selend.y = top.y;
+                term->selstart.y = term->selend.y = curline.y;
                 term->selstart.x = begin;
                 term->selend.x = end;
                 term->selstate = SELECTED;
@@ -5665,9 +5681,10 @@ int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
         }
 
         find_initbuf(&buf);
-        
-        top.y++;
-    	top.x = 0;
+
+        backward?bottom.y--,bottom.x=term->cols:top.y++;
+        curline = backward?bottom:top;
+        curline.x = 0;
     }
     sfree(buf.textbuf);
     sfree(buf.posbuf);
