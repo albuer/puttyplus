@@ -527,6 +527,7 @@ PSID get_user_sid(void);
  * Exports from winser.c.
  */
 extern Backend serial_backend;
+extern Backend echo_backend;
 
 /*
  * Exports from winjump.c.

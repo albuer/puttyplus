@@ -219,6 +219,7 @@ char *get_ttymode(void *frontend, const char *mode)
     return term_get_ttymode(term, mode);
 }
 
+//#define USE_ECHO
 static void close_session(void);
 
 static void start_backend(void)
@@ -232,7 +233,11 @@ static void start_backend(void)
      * Select protocol. This is farmed out into a table in a
      * separate file to enable an ssh-free variant.
      */
+    #ifdef USE_ECHO
+    back = backend_from_proto(PROT_ECHO);
+    #else
     back = backend_from_proto(conf_get_int(conf, CONF_protocol));
+    #endif
     if (back == NULL) {
 	char *str = dupprintf("%s Internal Error", appname);
 	MessageBox(NULL, "Unsupported protocol number found",
