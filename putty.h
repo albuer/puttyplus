@@ -309,7 +309,8 @@ enum {
     /* PROT_SERIAL is supported on a subset of platforms, but it doesn't
      * hurt to define it globally. */
     PROT_SERIAL,
-    PROT_ECHO
+    PROT_ECHO,
+    PROT_CONSOLE,
 };
 
 enum {

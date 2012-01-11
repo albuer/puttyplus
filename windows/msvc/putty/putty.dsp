@@ -291,6 +291,10 @@ SOURCE=..\..\..\windows\wincfg.c
 # End Source File
 # Begin Source File
 
+SOURCE=..\..\winconso.c
+# End Source File
+# Begin Source File
+
 SOURCE=..\..\..\windows\winctrls.c
 # End Source File
 # Begin Source File
@@ -304,6 +308,10 @@ SOURCE=..\..\..\windows\windlg.c
 # Begin Source File
 
 SOURCE=..\..\..\windows\window.c
+# End Source File
+# Begin Source File
+
+SOURCE=..\..\winecho.c
 # End Source File
 # Begin Source File
 

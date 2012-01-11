@@ -234,7 +234,7 @@ static void start_backend(void)
      * separate file to enable an ssh-free variant.
      */
     #ifdef USE_ECHO
-    back = backend_from_proto(PROT_ECHO);
+    back = backend_from_proto(PROT_CONSOLE/*PROT_ECHO*/);
     #else
     back = backend_from_proto(conf_get_int(conf, CONF_protocol));
     #endif
