@@ -635,6 +635,7 @@ void save_open_settings(void *sesskey, Conf *conf)
     write_setting_i(sesskey, "SerialParity", conf_get_int(conf, CONF_serparity));
     write_setting_i(sesskey, "SerialFlowControl", conf_get_int(conf, CONF_serflow));
     write_setting_s(sesskey, "WindowClass", conf_get_str(conf, CONF_winclass));
+    write_setting_s(sesskey, "ConsoleProgram", conf_get_str(conf, CONF_consoleprgm));
 }
 
 void load_settings(char *section, Conf *conf)
@@ -976,6 +977,7 @@ void load_open_settings(void *sesskey, Conf *conf)
     gppi(sesskey, "SerialParity", SER_PAR_NONE, conf, CONF_serparity);
     gppi(sesskey, "SerialFlowControl", SER_FLOW_XONXOFF, conf, CONF_serflow);
     gpps(sesskey, "WindowClass", "", conf, CONF_winclass);
+    gpps(sesskey, "ConsoleProgram", "", conf, CONF_consoleprgm);
 }
 
 void do_defaults(char *session, Conf *conf)

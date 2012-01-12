@@ -855,6 +855,7 @@ void cleanup_exit(int);
     X(INT, NONE, shadowboldoffset) \
     X(INT, NONE, crhaslf) \
     X(STR, NONE, winclass) \
+    X(STR, NONE, consoleprgm) \
 
 /* Now define the actual enum of option keywords using that macro. */
 #define CONF_ENUM_DEF(valtype, keytype, keyword) CONF_ ## keyword,
@@ -1098,6 +1099,12 @@ char const *conf_dest(Conf *conf);
  * Exports from sercfg.c.
  */
 void ser_setup_config_box(struct controlbox *b, int midsession,
+			  int parity_mask, int flow_mask);
+
+/*
+ * Exports from consocfg.c.
+ */
+void console_setup_config_box(struct controlbox *b, int midsession,
 			  int parity_mask, int flow_mask);
 
 /*

@@ -237,7 +237,7 @@ static int CALLBACK FindProc(HWND hwnd, UINT msg,
 
     switch (msg) {
     case WM_INITDIALOG:
-        CheckRadioButton(hwnd, IDC_RADIO_FORWARD, IDC_RADIO_BACKWARD, IDC_RADIO_FORWARD);
+        CheckRadioButton(hwnd, IDC_RADIO_FORWARD, IDC_RADIO_BACKWARD, IDC_RADIO_BACKWARD);
         SetFocus(GetDlgItem(hwnd, IDC_EDIT_FIND));
         return 0;
     case WM_COMMAND:

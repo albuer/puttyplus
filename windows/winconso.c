@@ -232,6 +232,7 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
     HANDLE  hClientWrite,hServerRead;
 	char shellCmd[_MAX_PATH];
     DWORD monitor_threadid;
+    char *prgm;
 
     InitializeCriticalSection(&CriticalSection);
 
@@ -259,7 +260,7 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
 
 	GetStartupInfo(&si);
 	si.dwFlags = STARTF_USESHOWWINDOW|STARTF_USESTDHANDLES;
-	si.wShowWindow = SW_SHOWNORMAL;//SW_HIDE;
+	si.wShowWindow = SW_HIDE;
 	si.hStdOutput = hServerWrite;
 	si.hStdError = hServerWrite;
 	si.hStdInput = hServerRead;
@@ -268,7 +269,20 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
 	if( !GetEnvironmentVariable(("ComSpec"), shellCmd, _MAX_PATH) )
 		  return "Can not found cmd.exe";
     
+    prgm = conf_get_str(conf, CONF_consoleprgm);
+    
 	strcat( shellCmd, (" /A") );// /C d:\\rockadb\\tools\\adb.exe shell
+	if( prgm[0] )
+	{
+		strcat(shellCmd, " /C ");
+        strcat(shellCmd, prgm);
+	}
+
+    {
+    	char *msg = dupprintf("running program: %s", prgm);
+    	logevent(console->frontend, msg);
+    }
+
 
 	if( !CreateProcess(NULL, shellCmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi) )
 	{
@@ -321,7 +335,8 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
 
 //    need_echo = 1;
     
-    *realhost = dupstr("Console");
+    *realhost = dupstr(prgm);
+
     update_specials_menu(console->frontend);
 
     return NULL;

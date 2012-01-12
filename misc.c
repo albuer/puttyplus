@@ -673,15 +673,19 @@ void debug_memdump(void *buf, int len, int L)
 int conf_launchable(Conf *conf)
 {
     if (conf_get_int(conf, CONF_protocol) == PROT_SERIAL)
-	return conf_get_str(conf, CONF_serline)[0] != 0;
+    	return conf_get_str(conf, CONF_serline)[0] != 0;
+    else if (conf_get_int(conf, CONF_protocol) == PROT_CONSOLE)
+    	return 1;//conf_get_str(conf, CONF_consoleprgm)[0] != 0;
     else
-	return conf_get_str(conf, CONF_host)[0] != 0;
+    	return conf_get_str(conf, CONF_host)[0] != 0;
 }
 
 char const *conf_dest(Conf *conf)
 {
     if (conf_get_int(conf, CONF_protocol) == PROT_SERIAL)
-	return conf_get_str(conf, CONF_serline);
+    	return conf_get_str(conf, CONF_serline);
+    if (conf_get_int(conf, CONF_protocol) == PROT_CONSOLE)
+    	return conf_get_str(conf, CONF_consoleprgm);
     else
-	return conf_get_str(conf, CONF_host);
+    	return conf_get_str(conf, CONF_host);
 }

@@ -25,7 +25,9 @@ Filename *platform_default_filename(const char *name)
 char *platform_default_s(const char *name)
 {
     if (!strcmp(name, "SerialLine"))
-	return dupstr("COM1");
+	    return dupstr("COM1");
+    else if (!strcmp(name, "ConsoleProgram"))
+        return dupstr("adb.exe shell");
     return NULL;
 }
 
