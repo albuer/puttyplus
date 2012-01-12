@@ -46,6 +46,10 @@ static int nevents = 0, negsize = 0;
 
 extern Conf *conf;		       /* defined in window.c */
 
+extern int term_find(Terminal *term, wchar_t* str_find, 
+                int backward, int match_case, int match_whole);
+
+
 #define PRINTER_DISABLED_STRING "None (printing disabled)"
 
 void force_normal(HWND hwnd)
@@ -232,9 +236,6 @@ static int CALLBACK AboutProc(HWND hwnd, UINT msg,
 static int CALLBACK FindProc(HWND hwnd, UINT msg,
 			    WPARAM wParam, LPARAM lParam)
 {
-    int i;
-    HWND ctrl;
-
     switch (msg) {
     case WM_INITDIALOG:
         CheckRadioButton(hwnd, IDC_RADIO_FORWARD, IDC_RADIO_BACKWARD, IDC_RADIO_BACKWARD);
@@ -256,7 +257,7 @@ static int CALLBACK FindProc(HWND hwnd, UINT msg,
                 int match_whole = (BST_CHECKED==IsDlgButtonChecked(hwnd, IDC_CHK_WHOLE));
                 int backward = (BST_CHECKED==IsDlgButtonChecked(hwnd, IDC_RADIO_BACKWARD));
                 GetDlgItemText(hwnd, IDC_EDIT_FIND, strFind, 511);
-                MultiByteToWideChar(CP_ACP, NULL, strFind, 511, wstrFind, 511);
+                MultiByteToWideChar(CP_ACP, 0, strFind, 511, wstrFind, 511);
                 if(!term_find(term, wstrFind, backward, match_case, match_whole))
                 {
                     char msg_text[530];

@@ -2,6 +2,8 @@
  * PuTTY version numbering
  */
 
+#define SVN_REV 2
+
 #define STR1(x) #x
 #define STR(x) STR1(x)
 

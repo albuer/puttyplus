@@ -108,11 +108,11 @@ static const char *echo_init(void *frontend_handle, void **backend_handle,
     echo->hRead = hRead;
     echo->hWrite = hWrite;
     echo->out = handle_output_new(hWrite, echo_sentdata, echo,
-				    HANDLE_FLAG_OVERLAPPED);
+				    HANDLE_FLAG_OVERLAPPED, NULL);
     echo->in = handle_input_new(hRead, echo_gotdata, echo,
 				  HANDLE_FLAG_OVERLAPPED |
 				  HANDLE_FLAG_IGNOREEOF |
-				  HANDLE_FLAG_UNITBUFFER);
+				  HANDLE_FLAG_UNITBUFFER, NULL);
     
     *realhost = dupstr("ECHO");
     update_specials_menu(echo->frontend);

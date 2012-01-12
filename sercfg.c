@@ -142,6 +142,7 @@ void ser_setup_config_box(struct controlbox *b, int midsession,
 	s = ctrl_getset(b, "Session", "hostport",
 			"Specify the destination you want to connect to");
 
+/*
         for (i = 0; i < s->ncontrols; i++) {
             c = s->ctrls[i];
 	    if (c->generic.type == CTRL_RADIO &&
@@ -162,6 +163,7 @@ void ser_setup_config_box(struct controlbox *b, int midsession,
 		}
 	    }
 	}
+*/
     }
 
     /*

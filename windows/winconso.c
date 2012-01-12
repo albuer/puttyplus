@@ -9,45 +9,152 @@
 #include <Tlhelp32.h>
 
 #include "putty.h"
+#include "cmdhistory.h"
+
+int left_limit_x, left_limit_y;
+int right_limit_x, right_limit_y;
 
 typedef struct console_backend_data {
     HANDLE hClientRead, hClientWrite, hServerWrite, hServerRead;
-    HANDLE hProcess, hThread;
     struct handle *out, *in;
     DWORD dwProcessId;
-    HWND hwnd;
-	char title[1024];
     void *frontend;
     int bufsize;
 } *Console;
 
+typedef BOOL (*process_handle)(DWORD);
+
+typedef struct{
+    LPSECURITY_ATTRIBUTES lpPipeAttributes;
+    PHANDLE hPipe;
+    LPTSTR lpszPipename;
+} CREATE_PIPE;
+
 static const char* base_title = "PuTTY Plus Console";
 static int need_echo = 1;
-CRITICAL_SECTION CriticalSection;
-char cmd_buf[1024] = "\0";
-int cmd_len = 0;
 
-static DWORD WINAPI console_monitor_thread(void *param)
+#define BUFSIZE 2048
+#define BASE_PIPENAME "\\\\.\\pipe\\puttyplus"
+
+static DWORD WINAPI get_write_pipe_thread(void *param)
 {
-    Console console = (Console)param;
+    CREATE_PIPE* pipeParam = (CREATE_PIPE*)param;
+	HANDLE hPipe;
 
-    if( WAIT_OBJECT_0==WaitForSingleObject(console->hProcess, INFINITE) )
+	if( !WaitNamedPipe(pipeParam->lpszPipename, NMPWAIT_WAIT_FOREVER) )
+	{
+		int err = GetLastError();
+		return -1;
+	}
+
+	hPipe = CreateFile(pipeParam->lpszPipename,
+						GENERIC_WRITE,
+						0,
+						pipeParam->lpPipeAttributes,
+						OPEN_EXISTING,
+						FILE_FLAG_OVERLAPPED,
+						NULL);
+
+	if( INVALID_HANDLE_VALUE == hPipe )
+	{
+		int err = GetLastError();
+		return -1;
+	}
+
+	*pipeParam->hPipe = hPipe;
+
+	return 0;
+}
+
+static BOOL CreateNamedPipePair(PHANDLE hReadPipe, 
+                         PHANDLE hWritePipe, 
+                         LPSECURITY_ATTRIBUTES lpPipeAttributes, 
+                         DWORD nSize)
+{
+	HANDLE hEvent;
+	HANDLE hPipeR = INVALID_HANDLE_VALUE;
+    HANDLE hPipeW = INVALID_HANDLE_VALUE;
+	OVERLAPPED lp;
+    DWORD threadid;
+    HANDLE hClientThread;
+    CREATE_PIPE *pcreate_pipe_param;
+    char pipename[512];
+    static DWORD dwAccumulator = 0;
+    sprintf( pipename, "%s_%08X_%08X", BASE_PIPENAME, GetTickCount(), dwAccumulator++ );
+
+	hPipeR = CreateNamedPipe( 
+				pipename,
+				PIPE_ACCESS_INBOUND | FILE_FLAG_OVERLAPPED,
+				0,
+				1,
+				nSize,
+				nSize,
+				0,
+				lpPipeAttributes);
+	if( INVALID_HANDLE_VALUE == hPipeR )
+	{
+		int err = GetLastError();
+		return FALSE;
+	}
+
+	hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+	if(hEvent == NULL)
+	{
+		int err = GetLastError();
+		CloseHandle(hPipeR);
+		return FALSE;
+	}
+
+	ZeroMemory(&lp, sizeof(OVERLAPPED));
+	lp.hEvent = hEvent;
+
+	if( !ConnectNamedPipe(hPipeR, &lp) )
+	{
+		if( ERROR_IO_PENDING != GetLastError() )
+		{
+			int err = GetLastError();
+			CloseHandle(hEvent);
+			CloseHandle(hPipeR);
+			return FALSE;
+		}
+	}
+
+	// 创建线程，用于获取 pipe_client
+	pcreate_pipe_param = (CREATE_PIPE*)malloc(sizeof(CREATE_PIPE));
+    pcreate_pipe_param->lpPipeAttributes = lpPipeAttributes;
+    pcreate_pipe_param->hPipe = &hPipeW;
+    pcreate_pipe_param->lpszPipename = pipename;
+    
+	hClientThread = CreateThread(NULL, 0, get_write_pipe_thread, 
+                                    pcreate_pipe_param, 0, &threadid);
+    WaitForSingleObject(hClientThread, INFINITE);
+    free(pcreate_pipe_param);
+    
+    if(hPipeW == INVALID_HANDLE_VALUE)
     {
-		__try
-		{
-			EnterCriticalSection(&CriticalSection);
-			if (console->hServerWrite != INVALID_HANDLE_VALUE) {
-				CloseHandle(console->hServerWrite);
-        		console->hServerWrite = INVALID_HANDLE_VALUE;
-			}
-		}
-		__finally
-		{
-			LeaveCriticalSection(&CriticalSection);
-		}
+        int err = GetLastError();
+		CloseHandle(hEvent);
+		CloseHandle(hPipeR);
+		CloseHandle(hClientThread);
+        return FALSE;
     }
+    CloseHandle(hClientThread);
 
-    return 0;
+    // 等待直到Client连接到Server
+	if(WAIT_FAILED == WaitForSingleObject(hEvent, INFINITE))
+	{
+		int err = GetLastError();
+		CloseHandle(hEvent);
+		CloseHandle(hPipeR);
+        CloseHandle(hPipeW);
+		return FALSE;
+	}
+
+	CloseHandle(hEvent);
+    
+    *hReadPipe = hPipeR;
+    *hWritePipe = hPipeW;
+    return TRUE;
 }
 
 static BOOL process_has_childs(DWORD dwProcessId)
@@ -69,8 +176,6 @@ static BOOL close_process(DWORD dwProcessId)
 	}
     return TRUE;
 }
-
-typedef BOOL (*process_handle)(DWORD);
 
 static int find_child_process(DWORD dwProcessId, process_handle handle)
 {
@@ -112,45 +217,17 @@ static int find_child_process(DWORD dwProcessId, process_handle handle)
 
 static void console_terminate(Console console)
 {
-//	int ret;
-//    WriteFile(console->hWrite, "exit\n", strlen("exit\n"), &ret, NULL);
-//	Sleep(200);
+    // 关闭子进程及该子进程创建的所有进程
     find_child_process(console->dwProcessId, close_process);
     close_process(console->dwProcessId);
     console->dwProcessId = (DWORD)(-1);
-    
-    if (console->hServerRead != INVALID_HANDLE_VALUE) {
-        if( !CloseHandle(console->hServerRead) )
-        {
-        }
-    	console->hServerRead = INVALID_HANDLE_VALUE;
-    }
-	__try
-	{
-        EnterCriticalSection(&CriticalSection);
-        if (console->hServerWrite != INVALID_HANDLE_VALUE) {
-            if( !CloseHandle(console->hServerWrite) )
-            {
-            }
-        	console->hServerWrite = INVALID_HANDLE_VALUE;
-        }
-	}
-	__finally
-	{
-		LeaveCriticalSection(&CriticalSection);
-	}
-    Sleep(100);
-    
+
     if (console->hClientWrite != INVALID_HANDLE_VALUE) {
-        if( !CloseHandle(console->hClientWrite) )
-        {
-        }
+        CloseHandle(console->hClientWrite);
     	console->hClientWrite = INVALID_HANDLE_VALUE;
     }
     if (console->hClientRead != INVALID_HANDLE_VALUE) {
-    	if( !CloseHandle(console->hClientRead) )
-    	{
-    	}
+    	CloseHandle(console->hClientRead);
     	console->hClientRead = INVALID_HANDLE_VALUE;
     }
 
@@ -162,6 +239,7 @@ static void console_terminate(Console console)
     	handle_free(console->in);
     	console->in = NULL;
     }
+    // clear cmd history list
 }
 
 static int console_gotdata(struct handle *h, void *data, int len)
@@ -187,14 +265,19 @@ static int console_gotdata(struct handle *h, void *data, int len)
         connection_fatal(console->frontend, "%s", error_msg);
         return 0;
     } else {
+        // need echo if no child process
         BOOL no_child = (find_child_process(console->dwProcessId, process_has_childs)==0);
         if( no_child != need_echo )
         {
-            cmd_buf[0] = 0;
-            cmd_len = 0;
+			// clean cmd buffer
+			cmdh_init();
             need_echo = no_child;
         }
-        return from_backend(console->frontend, 0, data, len);
+        
+        from_backend(console->frontend, 0, data, len);
+        if(need_echo)
+            from_backend_pos(console->frontend, &left_limit_x, &left_limit_y);
+        return 0;
     }
 }
 
@@ -228,32 +311,27 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
     SECURITY_ATTRIBUTES sa;
 	STARTUPINFO si;
 	PROCESS_INFORMATION pi;
-    HANDLE  hClientRead,hServerWrite;
-    HANDLE  hClientWrite,hServerRead;
 	char shellCmd[_MAX_PATH];
-    DWORD monitor_threadid;
     char *prgm;
 
-    InitializeCriticalSection(&CriticalSection);
+    int* test = malloc(4);
 
-    term_do_paste(term);
-    
+    // Initial Console struct
     console = snew(struct console_backend_data);
     console->out = console->in = NULL;
     console->bufsize = 0;
     *backend_handle = console;
     console->frontend = frontend_handle;
     console->dwProcessId = (DWORD)(-1);
-	console->hwnd = NULL;
     
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
     sa.lpSecurityDescriptor = NULL;
     sa.bInheritHandle = TRUE;
-    if( !CreatePipe(&hClientRead, &hServerWrite, &sa, 4096) ) 
+    if( !CreateNamedPipePair(&console->hClientRead, &console->hServerWrite, &sa, BUFSIZE) ) 
     {
         return "Create pipe1 failed!";
     }
-    if( !CreatePipe(&hServerRead, &hClientWrite, &sa, 4096) ) 
+    if( !CreateNamedPipePair(&console->hServerRead, &console->hClientWrite, &sa, BUFSIZE) ) 
     {
         return "Create pipe2 failed!";
     }
@@ -261,21 +339,22 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
 	GetStartupInfo(&si);
 	si.dwFlags = STARTF_USESHOWWINDOW|STARTF_USESTDHANDLES;
 	si.wShowWindow = SW_HIDE;
-	si.hStdOutput = hServerWrite;
-	si.hStdError = hServerWrite;
-	si.hStdInput = hServerRead;
-    si.lpTitle = base_title;
+	si.hStdOutput = console->hServerWrite;
+	si.hStdError = console->hServerWrite;
+	si.hStdInput = console->hServerRead;
 
 	if( !GetEnvironmentVariable(("ComSpec"), shellCmd, _MAX_PATH) )
 		  return "Can not found cmd.exe";
     
     prgm = conf_get_str(conf, CONF_consoleprgm);
     
-	strcat( shellCmd, (" /A") );// /C d:\\rockadb\\tools\\adb.exe shell
+	strcat( shellCmd, (" /A") );
+    need_echo = 1;
 	if( prgm[0] )
 	{
 		strcat(shellCmd, " /C ");
         strcat(shellCmd, prgm);
+        need_echo = 0;
 	}
 
     {
@@ -283,58 +362,26 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
     	logevent(console->frontend, msg);
     }
 
-
 	if( !CreateProcess(NULL, shellCmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi) )
 	{
         return "Create process failed!";
 	}
+    Sleep(100);
 
-#if 0
-/*
-    if( !CloseHandle(pi.hProcess) )
-    {
-        return "CloseHandle(pi.hProcess) failed!";
-    }
-	*/
-    if( !CloseHandle(pi.hThread) )
-    {
-        return "CloseHandle(pi.hThread) failed!";
-    }
-    /*
-    if( !CloseHandle(hServerRead) )
-    {
-        return "CloseHandle(hServerRead) failed!";
-    }
-    */
-#endif
+    CloseHandle(pi.hThread);
+    CloseHandle(console->hServerWrite);
+    CloseHandle(console->hServerRead);
 
     console->dwProcessId = pi.dwProcessId;
-    console->hThread = pi.hThread;
-    console->hProcess = pi.hProcess;
     
-    console->hClientRead = hClientRead;
-    console->hClientWrite = hClientWrite;
-    console->hServerWrite = hServerWrite;
-    console->hServerRead = hServerRead;
-    
-    #if 0
-    console->out = handle_output_new(console->hWrite, console_sentdata, console,
-				    HANDLE_FLAG_OVERLAPPED);
-    console->in = handle_input_new(console->hRead, console_gotdata, console,
+    console->out = handle_output_new(console->hClientWrite, console_sentdata, console,
+				    HANDLE_FLAG_OVERLAPPED, pi.hProcess);
+    console->in = handle_input_new(console->hClientRead, console_gotdata, console,
 				  HANDLE_FLAG_OVERLAPPED |
-				  HANDLE_FLAG_IGNOREEOF |
-				  HANDLE_FLAG_UNITBUFFER);
-    #else
-    console->out = handle_output_new(console->hClientWrite, console_sentdata, console, 0);
-    console->in = handle_input_new(console->hClientRead, console_gotdata, console, HANDLE_FLAG_IGNOREEOF);
-    #endif
-    
-    // create monitor thread for child process exit
-    CreateThread(NULL, 0, console_monitor_thread,
-		        (void*)console, 0, &monitor_threadid);
+				  HANDLE_FLAG_IGNOREEOF, pi.hProcess);
 
-//    need_echo = 1;
-    
+    cmdh_init();
+
     *realhost = dupstr(prgm);
 
     update_specials_menu(console->frontend);
@@ -345,40 +392,16 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
 static void console_free(void *handle)
 {
     Console console = (Console) handle;
+    cmdh_free();
     console_terminate(console);
     expire_timer_context(console);
     sfree(console);
-    DeleteCriticalSection(&CriticalSection);
 }
 
 static void console_reconfig(void *handle, Conf *conf)
 {
-}
-
-static int key_process(char *buf, char *key, int len)
-{
-    if( !strncmp("\0x1B\0x5B\0x41", key, len) )
-    {// UP
-    }
-    else if( !strncmp("\0x1B\0x5B\0x42", key, len) )
-    {// DOWN
-    }
-    else if( !strncmp("\0x1B\0x5B\0x43", key, len) )
-    {// RIGHT
-    }
-    else if( !strncmp("\0x1B\0x5B\0x44", key, len) )
-    {// LEFT
-    }
-    else if( !strncmp("\0x1B\0x5B\0x31\0x7E", key, len) )
-    {// HOME
-    }
-    else if( !strncmp("\0x1B\0x5B\0x34\0x7E", key, len) )
-    {// END
-    }
-    else if( !strncmp("\0x1B\0x5B\0x33\0x7E", key, len) )
-    {// DELETE
-    }
-    return 1;
+    Console console = (Console) handle;
+    logevent(console->frontend, "console_reconfig");
 }
 
 /*
@@ -394,26 +417,18 @@ static int console_send(void *handle, char *buf, int len)
 
     if (need_echo)
     {
-        key_process(cmd_buf, buf, len);
-        
-        EnterCriticalSection(&CriticalSection);
-        if(console->hServerWrite)
-            WriteFile(console->hServerWrite, buf, len, &ret, NULL);
-        LeaveCriticalSection(&CriticalSection);
-        
-        strncpy(cmd_buf+cmd_len, buf, len);
-        cmd_len += len;
-        if(cmd_buf[cmd_len-1] == '\r')
+        const char *show = NULL;
+        const char *send = NULL;
+        buf[len] = '\0';
+        console->bufsize = 0;
+        cmd_add_char(buf, len, &show, &send);
+        if(show)
         {
-            cmd_buf[cmd_len] = '\n';
-            cmd_buf[cmd_len+1] = 0;
-            ++cmd_len;
-            console->bufsize = handle_write(console->out, cmd_buf, cmd_len);
-            cmd_buf[0] = 0;
-            cmd_len = 0;
+            from_backend(console->frontend, 0, show, strlen(show));
+            from_backend_pos(console->frontend, &right_limit_x, &right_limit_y);
         }
-        else
-            console->bufsize = 0;
+        if(send)
+            console->bufsize = handle_write(console->out, send, strlen(send));
     }
     else
     {
@@ -452,6 +467,8 @@ static void console_size(void *handle, int width, int height)
  */
 static void console_special(void *handle, Telnet_Special code)
 {
+    Console console = (Console) handle;
+    logevent(console->frontend, "console_special");
     return;
 }
 
@@ -469,11 +486,15 @@ static const struct telnet_special *console_get_specials(void *handle)
 
 static int console_connected(void *handle)
 {
+    Console console = (Console) handle;
+    logevent(console->frontend, "console_connected");
     return 1;			       /* always connected */
 }
 
 static int console_sendok(void *handle)
 {
+    Console console = (Console) handle;
+    logevent(console->frontend, "console_sendok");
     return 1;
 }
 
@@ -489,17 +510,23 @@ static int console_ldisc(void *handle, int option)
     /*
      * Local editing and local console are off by default.
      */
+    Console console = (Console) handle;
+    logevent(console->frontend, "console_ldisc");
     return 0;
 }
 
 static void console_provide_ldisc(void *handle, void *ldisc)
 {
     /* This is a stub. */
+    Console console = (Console) handle;
+    logevent(console->frontend, "console_provide_ldisc");
 }
 
-static void console_provide_logctx(void *handle, void *logctx)
+static void console_provide_logctx2(void *handle, void *logctx)
 {
     /* This is a stub. */
+    Console console = (Console) handle;
+    logevent(console->frontend, "console_provide_logctx2");
 }
 
 static int console_exitcode(void *handle)
@@ -518,6 +545,8 @@ static int console_exitcode(void *handle)
  */
 static int console_cfg_info(void *handle)
 {
+    Console console = (Console) handle;
+    logevent(console->frontend, "console_cfg_info");
     return 0;
 }
 
@@ -535,7 +564,7 @@ Backend console_backend = {
     console_sendok,
     console_ldisc,
     console_provide_ldisc,
-    console_provide_logctx,
+    console_provide_logctx2,
     console_unthrottle,
     console_cfg_info,
     "console",

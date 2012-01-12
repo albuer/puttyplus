@@ -5694,7 +5694,7 @@ int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
     return is_find;
 }
 
-void term_find(Terminal *term, wchar_t* str_find, 
+int term_find(Terminal *term, wchar_t* str_find, 
                 int backward, int match_case, int match_whole)
 {
     pos top;
@@ -5727,7 +5727,7 @@ void term_find(Terminal *term, wchar_t* str_find,
         }
     }
     
-    find_string(term, top, bottom, str_find, backward, match_case, match_whole);
+    return find_string(term, top, bottom, str_find, backward, match_case, match_whole);
 }
 
 /*
@@ -6977,5 +6977,11 @@ int term_get_userpass_input(Terminal *term, prompts_t *p,
 	p->data = NULL;
 	return +1; /* all done */
     }
+}
+
+void term_get_last_pos(Terminal *term, int* x, int* y)
+{
+    *y = term->curs.y+(-sblines(term));
+    *x = term->curs.x;
 }
 

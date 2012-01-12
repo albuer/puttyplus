@@ -461,6 +461,7 @@ extern const int be_default_protocol;
  * and other pieces of text.
  */
 extern const char *const appname;
+extern const char *const classname;
 
 /*
  * Some global flags denoting the type of application.

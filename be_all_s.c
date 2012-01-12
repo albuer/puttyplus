@@ -15,6 +15,7 @@
  * declarations of appname, for as long as I can...
  */
 const char *const appname = "PuTTY Plus";
+const char *const classname = "PuTTY";
 
 #ifdef TELNET_DEFAULT
 const int be_default_protocol = PROT_TELNET;

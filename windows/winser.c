@@ -262,11 +262,11 @@ static const char *serial_init(void *frontend_handle, void **backend_handle,
 
     serial->port = serport;
     serial->out = handle_output_new(serport, serial_sentdata, serial,
-				    HANDLE_FLAG_OVERLAPPED);
+				    HANDLE_FLAG_OVERLAPPED, NULL);
     serial->in = handle_input_new(serport, serial_gotdata, serial,
 				  HANDLE_FLAG_OVERLAPPED |
 				  HANDLE_FLAG_IGNOREEOF |
-				  HANDLE_FLAG_UNITBUFFER);
+				  HANDLE_FLAG_UNITBUFFER, NULL);
 
     *realhost = dupstr(serline);
 

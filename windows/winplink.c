@@ -612,8 +612,8 @@ int main(int argc, char **argv)
      * (The input one we leave until we're through the
      * authentication process.)
      */
-    stdout_handle = handle_output_new(outhandle, stdouterr_sent, NULL, 0);
-    stderr_handle = handle_output_new(errhandle, stdouterr_sent, NULL, 0);
+    stdout_handle = handle_output_new(outhandle, stdouterr_sent, NULL, 0, NULL);
+    stderr_handle = handle_output_new(errhandle, stdouterr_sent, NULL, 0, NULL);
 
     main_thread_id = GetCurrentThreadId();
 
@@ -629,7 +629,7 @@ int main(int argc, char **argv)
 
 	if (!sending && back->sendok(backhandle)) {
 	    stdin_handle = handle_input_new(inhandle, stdin_gotdata, NULL,
-					    0);
+					    0, NULL);
 	    sending = TRUE;
 	}
 

@@ -103,6 +103,8 @@ struct handle_input {
      * an input handle.
      */
     handle_inputfn_t gotdata;
+    
+    HANDLE hTerminate;
 };
 
 /*
@@ -114,12 +116,20 @@ static DWORD WINAPI handle_input_threadfunc(void *param)
     OVERLAPPED ovl, *povl;
     HANDLE oev;
     int readret, readlen;
+    HANDLE hEvents[2];
+    int waitHandles = 1;
 
     if (ctx->flags & HANDLE_FLAG_OVERLAPPED) {
-	povl = &ovl;
-	oev = CreateEvent(NULL, TRUE, FALSE, NULL);
+    	povl = &ovl;
+    	oev = CreateEvent(NULL, TRUE, FALSE, NULL);
+        hEvents[0] = oev;
+        if( ctx->hTerminate!=NULL )
+        {
+            hEvents[1] = ctx->hTerminate;
+            ++waitHandles;
+        }
     } else {
-	povl = NULL;
+    	povl = NULL;
     }
 
     if (ctx->flags & HANDLE_FLAG_UNITBUFFER)
@@ -138,12 +148,22 @@ static DWORD WINAPI handle_input_threadfunc(void *param)
 	else
 	    ctx->readerr = 0;
 	if (povl && !readret && ctx->readerr == ERROR_IO_PENDING) {
-	    WaitForSingleObject(povl->hEvent, INFINITE);
-	    readret = GetOverlappedResult(ctx->h, povl, &ctx->len, FALSE);
-	    if (!readret)
-		ctx->readerr = GetLastError();
-	    else
-		ctx->readerr = 0;
+        DWORD dwResult = WaitForMultipleObjects(waitHandles, hEvents, FALSE, INFINITE);
+        if (dwResult == WAIT_TIMEOUT ||
+            dwResult == WAIT_FAILED ||
+            dwResult == WAIT_OBJECT_0+1)
+        {
+            readret = 0;
+            ctx->readerr = ERROR_BROKEN_PIPE;
+        }
+        else
+        {
+    	    readret = GetOverlappedResult(ctx->h, povl, &ctx->len, FALSE);
+    	    if (!readret)
+        		ctx->readerr = GetLastError();
+    	    else
+        		ctx->readerr = 0;
+        }
 	}
 
 	if (!readret) {
@@ -155,7 +175,7 @@ static DWORD WINAPI handle_input_threadfunc(void *param)
 	     * particular error, we pretend it's EOF.
 	     */
 	    if (ctx->readerr == ERROR_BROKEN_PIPE)
-		ctx->readerr = 0;
+    		ctx->readerr = 0;
 	    ctx->len = 0;
 	}
 
@@ -174,7 +194,7 @@ static DWORD WINAPI handle_input_threadfunc(void *param)
     }
 
     if (povl)
-	CloseHandle(oev);
+    	CloseHandle(oev);
 
     return 0;
 }
@@ -257,6 +277,8 @@ struct handle_output {
      * drops.
      */
     handle_outputfn_t sentdata;
+    //
+    HANDLE hTerminate;
 };
 
 static DWORD WINAPI handle_output_threadfunc(void *param)
@@ -371,7 +393,7 @@ static int handle_find_evtomain(void *av, void *bv)
 }
 
 struct handle *handle_input_new(HANDLE handle, handle_inputfn_t gotdata,
-				void *privdata, int flags)
+				void *privdata, int flags, HANDLE ht)
 {
     struct handle *h = snew(struct handle);
     DWORD in_threadid; /* required for Win9x */
@@ -386,6 +408,7 @@ struct handle *handle_input_new(HANDLE handle, handle_inputfn_t gotdata,
     h->u.i.done = FALSE;
     h->u.i.privdata = privdata;
     h->u.i.flags = flags;
+    h->u.i.hTerminate = ht;
 
     if (!handles_by_evtomain)
 	handles_by_evtomain = newtree234(handle_cmp_evtomain);
@@ -399,7 +422,7 @@ struct handle *handle_input_new(HANDLE handle, handle_inputfn_t gotdata,
 }
 
 struct handle *handle_output_new(HANDLE handle, handle_outputfn_t sentdata,
-				 void *privdata, int flags)
+				 void *privdata, int flags, HANDLE ht)
 {
     struct handle *h = snew(struct handle);
     DWORD out_threadid; /* required for Win9x */
@@ -417,6 +440,7 @@ struct handle *handle_output_new(HANDLE handle, handle_outputfn_t sentdata,
     h->u.o.outgoingeof = EOF_NO;
     h->u.o.sentdata = sentdata;
     h->u.o.flags = flags;
+    h->u.o.hTerminate = ht;
 
     if (!handles_by_evtomain)
 	handles_by_evtomain = newtree234(handle_cmp_evtomain);

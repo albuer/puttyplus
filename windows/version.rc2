@@ -34,12 +34,15 @@
  * (This is a ripoff of ../version.c.)
  */
 
+#define SVN_REV 2
+
 #define STR1(x) #x
 #define STR(x) STR1(x)
 
 /* We keep this around even for snapshots, for monotonicity of version
  * numbering. It needs to be kept up to date. NB _comma_-separated. */
 #define BASE_VERSION 0,62
+#define PLUS_BASE_VERSION 0,00
 
 #if defined SNAPSHOT
 
@@ -72,7 +75,7 @@
 #ifdef MODIFIED
 #define BINARY_VERSION 0,0,0,0
 #else
-#define BINARY_VERSION BASE_VERSION,SVN_REV,0
+#define BINARY_VERSION PLUS_BASE_VERSION,SVN_REV,0
 #endif
 
 #else
@@ -114,7 +117,7 @@ BEGIN
 	BLOCK "080904B0"
 	BEGIN
 	    VALUE "CompanyName",	"Simon Tatham"  /* required :/ */
-	    VALUE "ProductName",	"PuTTY suite"
+	    VALUE "ProductName",	"PuTTY Plus"
 	    VALUE "FileDescription",	APPDESC
 	    VALUE "InternalName",	APPNAME
 	    VALUE "OriginalFilename",	APPNAME

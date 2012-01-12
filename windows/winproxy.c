@@ -216,9 +216,9 @@ Socket platform_new_connection(SockAddr addr, char *hostname,
     ret->from_cmd_H = us_from_cmd;
 
     ret->from_cmd_h = handle_input_new(ret->from_cmd_H, localproxy_gotdata,
-				       ret, 0);
+				       ret, 0, NULL);
     ret->to_cmd_h = handle_output_new(ret->to_cmd_H, localproxy_sentdata,
-				      ret, 0);
+				      ret, 0, NULL);
 
     /* We are responsible for this and don't need it any more */
     sk_addr_free(addr);

@@ -1320,10 +1320,12 @@ void setup_config_box(struct controlbox *b, int midsession,
 	    ctrl_radiobuttons(s, "Connection type:", NO_SHORTCUT, 4,
 			      HELPCTX(session_hostname),
 			      config_protocolbuttons_handler, P(hp),
-			      "Raw", 'w', I(PROT_RAW),
-			      "Telnet", 't', I(PROT_TELNET),
-			      "Rlogin", 'i', I(PROT_RLOGIN),
 			      "SSH", 's', I(PROT_SSH),
+			      "Serial",'r', I(PROT_SERIAL),
+			      "Console",NO_SHORTCUT, I(PROT_CONSOLE),
+			      "Telnet", 't', I(PROT_TELNET),
+			      "Raw", 'w', I(PROT_RAW),
+			      "Rlogin", 'i', I(PROT_RLOGIN),
 			      NULL);
 	}
     }

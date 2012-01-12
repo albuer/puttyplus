@@ -457,6 +457,7 @@ void defuse_showwindow(void);
 int do_config(void);
 int do_reconfig(HWND, int);
 void showeventlog(HWND);
+void showfind(HWND);
 void showabout(HWND);
 void force_normal(HWND hwnd);
 void modal_about_box(HWND hwnd);
@@ -491,9 +492,9 @@ struct handle;
 typedef int (*handle_inputfn_t)(struct handle *h, void *data, int len);
 typedef void (*handle_outputfn_t)(struct handle *h, int new_backlog);
 struct handle *handle_input_new(HANDLE handle, handle_inputfn_t gotdata,
-				void *privdata, int flags);
+				void *privdata, int flags, HANDLE hTerminate);
 struct handle *handle_output_new(HANDLE handle, handle_outputfn_t sentdata,
-				 void *privdata, int flags);
+				 void *privdata, int flags, HANDLE hTerminate);
 int handle_write(struct handle *h, const void *data, int len);
 void handle_write_eof(struct handle *h);
 HANDLE *handle_get_events(int *nevents);

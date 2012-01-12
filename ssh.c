@@ -1904,7 +1904,7 @@ static struct Packet *ssh1_pkt_init(int pkt_type)
 {
     struct Packet *pkt = ssh_new_packet();
     pkt->length = 4 + 8;	    /* space for length + max padding */
-    ssh_pkt_addbyte(pkt, pkt_type);
+    ssh_pkt_addbyte(pkt, (unsigned char)pkt_type);
     pkt->body = pkt->data + pkt->length;
     return pkt;
 }
@@ -5093,8 +5093,8 @@ static void ssh1_send_ttymode(void *data, char *mode, char *val)
 	arg = ssh_tty_parse_boolean(val);
 	break;
     }
-    ssh2_pkt_addbyte(pktout, ssh_ttymodes[i].opcode);
-    ssh2_pkt_addbyte(pktout, arg);
+    ssh2_pkt_addbyte(pktout, (unsigned char)ssh_ttymodes[i].opcode);
+    ssh2_pkt_addbyte(pktout, (unsigned char)arg);
 }
 
 
@@ -7445,7 +7445,7 @@ static void ssh2_send_ttymode(void *data, char *mode, char *val)
 	arg = ssh_tty_parse_boolean(val);
 	break;
     }
-    ssh2_pkt_addbyte(pktout, ssh_ttymodes[i].opcode);
+    ssh2_pkt_addbyte(pktout, (unsigned char)ssh_ttymodes[i].opcode);
     ssh2_pkt_adduint32(pktout, arg);
 }
 

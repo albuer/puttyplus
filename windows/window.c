@@ -219,7 +219,6 @@ char *get_ttymode(void *frontend, const char *mode)
     return term_get_ttymode(term, mode);
 }
 
-#define USE_ECHO
 static void close_session(void);
 
 static void start_backend(void)
@@ -233,11 +232,7 @@ static void start_backend(void)
      * Select protocol. This is farmed out into a table in a
      * separate file to enable an ssh-free variant.
      */
-    #ifdef USE_ECHO
-    back = backend_from_proto(PROT_CONSOLE/*PROT_ECHO*/);
-    #else
     back = backend_from_proto(conf_get_int(conf, CONF_protocol));
-    #endif
     if (back == NULL) {
 	char *str = dupprintf("%s Internal Error", appname);
 	MessageBox(NULL, "Unsupported protocol number found",
@@ -658,7 +653,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 	wndclass.hCursor = LoadCursor(NULL, IDC_IBEAM);
 	wndclass.hbrBackground = NULL;
 	wndclass.lpszMenuName = NULL;
-	wndclass.lpszClassName = appname;
+	wndclass.lpszClassName = classname;
 
 	RegisterClass(&wndclass);
     }
@@ -702,7 +697,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 	    exwinmode |= WS_EX_TOPMOST;
 	if (conf_get_int(conf, CONF_sunken_edge))
 	    exwinmode |= WS_EX_CLIENTEDGE;
-	hwnd = CreateWindowEx(exwinmode, appname, appname,
+	hwnd = CreateWindowEx(exwinmode, classname, appname,
 			      winmode, CW_USEDEFAULT, CW_USEDEFAULT,
 			      guess_width, guess_height,
 			      NULL, NULL, inst, NULL);
@@ -5677,6 +5672,12 @@ int from_backend_untrusted(void *frontend, const char *data, int len)
 int from_backend_eof(void *frontend)
 {
     return TRUE;   /* do respond to incoming EOF with outgoing */
+}
+
+int from_backend_pos(void *frontend, int* x, int* y)
+{
+    term_get_last_pos(term, x, y);
+    return 0;   /* do respond to incoming EOF with outgoing */
 }
 
 int get_userpass_input(prompts_t *p, unsigned char *in, int inlen)
