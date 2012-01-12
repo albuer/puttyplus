@@ -5,13 +5,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <limits.h>
+#include "winstuff.h"
+#include <Tlhelp32.h>
 
 #include "putty.h"
 
-//#define SUPPORT_CMD
-
 typedef struct console_backend_data {
-    HANDLE hRead, hWrite, hToRead;
+    HANDLE hClientRead, hClientWrite, hServerWrite, hServerRead;
+    HANDLE hProcess, hThread;
     struct handle *out, *in;
     DWORD dwProcessId;
     HWND hwnd;
@@ -21,51 +22,136 @@ typedef struct console_backend_data {
 } *Console;
 
 static const char* base_title = "PuTTY Plus Console";
-#ifdef SUPPORT_CMD
 static int need_echo = 1;
-#endif
+CRITICAL_SECTION CriticalSection;
+char cmd_buf[1024] = "\0";
+int cmd_len = 0;
+
+static DWORD WINAPI console_monitor_thread(void *param)
+{
+    Console console = (Console)param;
+
+    if( WAIT_OBJECT_0==WaitForSingleObject(console->hProcess, INFINITE) )
+    {
+		__try
+		{
+			EnterCriticalSection(&CriticalSection);
+			if (console->hServerWrite != INVALID_HANDLE_VALUE) {
+				CloseHandle(console->hServerWrite);
+        		console->hServerWrite = INVALID_HANDLE_VALUE;
+			}
+		}
+		__finally
+		{
+			LeaveCriticalSection(&CriticalSection);
+		}
+    }
+
+    return 0;
+}
+
+static BOOL process_has_childs(DWORD dwProcessId)
+{
+    return FALSE;
+}
+
+static BOOL close_process(DWORD dwProcessId)
+{
+	HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, dwProcessId);
+	if( hProcess )
+	{
+        DWORD dwExitCode = 0;
+		TerminateProcess( hProcess,0 );
+        // 等待进程退出
+        WaitForSingleObject(hProcess, INFINITE);
+        GetExitCodeProcess(hProcess, &dwExitCode);
+		CloseHandle( hProcess );
+	}
+    return TRUE;
+}
+
+typedef BOOL (*process_handle)(DWORD);
+
+static int find_child_process(DWORD dwProcessId, process_handle handle)
+{
+    PROCESSENTRY32 pe32;
+	HANDLE hProcessSnap;
+	BOOL bMore = FALSE;
+    int count = 0;
+
+    pe32.dwSize = sizeof(pe32);
+
+    //   给系统内的所有进程拍一个快照
+    hProcessSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if(hProcessSnap == INVALID_HANDLE_VALUE)
+    {
+        return count;
+    }
+
+    //   遍历进程快照，轮流显示每个进程的信息
+    bMore = Process32First(hProcessSnap, &pe32);
+    while(bMore)
+    {
+        if(pe32.th32ParentProcessID == dwProcessId)
+        {
+            // 找到一个子进程，结束它
+            if(handle)
+            {
+                ++count;
+                if( (handle)(pe32.th32ProcessID) == FALSE )
+                    break;
+            }
+        }
+        bMore = Process32Next(hProcessSnap, &pe32);
+    }
+
+    //   不要忘记清除掉snapshot对象
+    CloseHandle(hProcessSnap);
+    return count;
+}
 
 static void console_terminate(Console console)
 {
 //	int ret;
 //    WriteFile(console->hWrite, "exit\n", strlen("exit\n"), &ret, NULL);
 //	Sleep(200);
-	if( console->dwProcessId!=(DWORD)(-1) )
+    find_child_process(console->dwProcessId, close_process);
+    close_process(console->dwProcessId);
+    console->dwProcessId = (DWORD)(-1);
+    
+    if (console->hServerRead != INVALID_HANDLE_VALUE) {
+        if( !CloseHandle(console->hServerRead) )
+        {
+        }
+    	console->hServerRead = INVALID_HANDLE_VALUE;
+    }
+	__try
 	{
-		HANDLE hProcess = OpenProcess( PROCESS_ALL_ACCESS, FALSE, console->dwProcessId );
-		if( hProcess )
-		{
-            DWORD dwExitCode = 0;
-			TerminateProcess( hProcess,0 );
-            WaitForSingleObject(hProcess, INFINITE);
-            GetExitCodeProcess(hProcess, &dwExitCode);
-			CloseHandle( hProcess );
-		}
-        console->dwProcessId = (DWORD)(-1);
+        EnterCriticalSection(&CriticalSection);
+        if (console->hServerWrite != INVALID_HANDLE_VALUE) {
+            if( !CloseHandle(console->hServerWrite) )
+            {
+            }
+        	console->hServerWrite = INVALID_HANDLE_VALUE;
+        }
 	}
+	__finally
+	{
+		LeaveCriticalSection(&CriticalSection);
+	}
+    Sleep(100);
     
-    if (console->hToRead != INVALID_HANDLE_VALUE) {
-        if( !CloseHandle(console->hToRead) )
+    if (console->hClientWrite != INVALID_HANDLE_VALUE) {
+        if( !CloseHandle(console->hClientWrite) )
         {
-            MessageBox(NULL, "CloseHandle(console->hToRead)", "", MB_OK);
         }
-    	console->hToRead = INVALID_HANDLE_VALUE;
-        Sleep(200);
+    	console->hClientWrite = INVALID_HANDLE_VALUE;
     }
-    
-    if (console->hWrite != INVALID_HANDLE_VALUE) {
-        if( !CloseHandle(console->hWrite) )
-        {
-            MessageBox(NULL, "CloseHandle(console->hWrite)", "", MB_OK);
-        }
-    	console->hWrite = INVALID_HANDLE_VALUE;
-    }
-    if (console->hRead != INVALID_HANDLE_VALUE) {
-    	if( !CloseHandle(console->hRead) )
+    if (console->hClientRead != INVALID_HANDLE_VALUE) {
+    	if( !CloseHandle(console->hClientRead) )
     	{
-            MessageBox(NULL, "CloseHandle(console->hRead)", "", MB_OK);
     	}
-    	console->hRead = INVALID_HANDLE_VALUE;
+    	console->hClientRead = INVALID_HANDLE_VALUE;
     }
 
     if (console->out) {
@@ -101,6 +187,13 @@ static int console_gotdata(struct handle *h, void *data, int len)
         connection_fatal(console->frontend, "%s", error_msg);
         return 0;
     } else {
+        BOOL no_child = (find_child_process(console->dwProcessId, process_has_childs)==0);
+        if( no_child != need_echo )
+        {
+            cmd_buf[0] = 0;
+            cmd_len = 0;
+            need_echo = no_child;
+        }
         return from_backend(console->frontend, 0, data, len);
     }
 }
@@ -138,6 +231,11 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
     HANDLE  hClientRead,hServerWrite;
     HANDLE  hClientWrite,hServerRead;
 	char shellCmd[_MAX_PATH];
+    DWORD monitor_threadid;
+
+    InitializeCriticalSection(&CriticalSection);
+
+    term_do_paste(term);
     
     console = snew(struct console_backend_data);
     console->out = console->in = NULL;
@@ -151,17 +249,17 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
     sa.lpSecurityDescriptor = NULL;
     sa.bInheritHandle = TRUE;
     if( !CreatePipe(&hClientRead, &hServerWrite, &sa, 4096) ) 
-    { 
+    {
         return "Create pipe1 failed!";
     }
     if( !CreatePipe(&hServerRead, &hClientWrite, &sa, 4096) ) 
-    { 
+    {
         return "Create pipe2 failed!";
     }
 
 	GetStartupInfo(&si);
 	si.dwFlags = STARTF_USESHOWWINDOW|STARTF_USESTDHANDLES;
-	si.wShowWindow = SW_SHOWNORMAL;//SW_HIDE;   
+	si.wShowWindow = SW_SHOWNORMAL;//SW_HIDE;
 	si.hStdOutput = hServerWrite;
 	si.hStdError = hServerWrite;
 	si.hStdInput = hServerRead;
@@ -170,29 +268,41 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
 	if( !GetEnvironmentVariable(("ComSpec"), shellCmd, _MAX_PATH) )
 		  return "Can not found cmd.exe";
     
-	strcat( shellCmd, (" /A /C d:\\rockadb\\tools\\adb.exe shell") );//
+	strcat( shellCmd, (" /A") );// /C d:\\rockadb\\tools\\adb.exe shell
 
 	if( !CreateProcess(NULL, shellCmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi) )
 	{
         return "Create process failed!";
 	}
+
+#if 0
+/*
     if( !CloseHandle(pi.hProcess) )
     {
         return "CloseHandle(pi.hProcess) failed!";
     }
+	*/
     if( !CloseHandle(pi.hThread) )
     {
         return "CloseHandle(pi.hThread) failed!";
     }
+    /*
     if( !CloseHandle(hServerRead) )
     {
         return "CloseHandle(hServerRead) failed!";
     }
+    */
+#endif
 
     console->dwProcessId = pi.dwProcessId;
-    console->hRead = hClientRead;
-    console->hWrite = hClientWrite;
-    console->hToRead = hServerWrite;
+    console->hThread = pi.hThread;
+    console->hProcess = pi.hProcess;
+    
+    console->hClientRead = hClientRead;
+    console->hClientWrite = hClientWrite;
+    console->hServerWrite = hServerWrite;
+    console->hServerRead = hServerRead;
+    
     #if 0
     console->out = handle_output_new(console->hWrite, console_sentdata, console,
 				    HANDLE_FLAG_OVERLAPPED);
@@ -201,12 +311,15 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
 				  HANDLE_FLAG_IGNOREEOF |
 				  HANDLE_FLAG_UNITBUFFER);
     #else
-    console->out = handle_output_new(console->hWrite, console_sentdata, console, 0);
-    console->in = handle_input_new(console->hRead, console_gotdata, console, HANDLE_FLAG_IGNOREEOF);
+    console->out = handle_output_new(console->hClientWrite, console_sentdata, console, 0);
+    console->in = handle_input_new(console->hClientRead, console_gotdata, console, HANDLE_FLAG_IGNOREEOF);
     #endif
-#ifdef SUPPORT_CMD
-    need_echo = 1;
-#endif
+    
+    // create monitor thread for child process exit
+    CreateThread(NULL, 0, console_monitor_thread,
+		        (void*)console, 0, &monitor_threadid);
+
+//    need_echo = 1;
     
     *realhost = dupstr("Console");
     update_specials_menu(console->frontend);
@@ -220,14 +333,39 @@ static void console_free(void *handle)
     console_terminate(console);
     expire_timer_context(console);
     sfree(console);
+    DeleteCriticalSection(&CriticalSection);
 }
 
 static void console_reconfig(void *handle, Conf *conf)
 {
 }
 
-char cmd[1024] = "\0";
-int cmd_len = 0;
+static int key_process(char *buf, char *key, int len)
+{
+    if( !strncmp("\0x1B\0x5B\0x41", key, len) )
+    {// UP
+    }
+    else if( !strncmp("\0x1B\0x5B\0x42", key, len) )
+    {// DOWN
+    }
+    else if( !strncmp("\0x1B\0x5B\0x43", key, len) )
+    {// RIGHT
+    }
+    else if( !strncmp("\0x1B\0x5B\0x44", key, len) )
+    {// LEFT
+    }
+    else if( !strncmp("\0x1B\0x5B\0x31\0x7E", key, len) )
+    {// HOME
+    }
+    else if( !strncmp("\0x1B\0x5B\0x34\0x7E", key, len) )
+    {// END
+    }
+    else if( !strncmp("\0x1B\0x5B\0x33\0x7E", key, len) )
+    {// DELETE
+    }
+    return 1;
+}
+
 /*
  * Called to send data down the console connection.
  */
@@ -235,122 +373,43 @@ static int console_send(void *handle, char *buf, int len)
 {
     Console console = (Console) handle;
     int ret = 0;
-	char title[1024];
 
     if (console->out == NULL)
     	return 0;
 
-	if( console->hwnd==NULL )
-	{
-		HWND hwnd = NULL;
-    
-		while( hwnd=FindWindowEx(hwnd, NULL, "ConsoleWindowClass",NULL) )
-		{
-			GetWindowText(hwnd, title, 1024);
-			if( !strncmp(title, base_title, strlen(base_title)) )
-			{
-                DWORD pid = 0;
-                GetWindowThreadProcessId(hwnd, &pid);
-                if(pid == console->dwProcessId)
-                {
-    				console->hwnd = hwnd;
-    				strcpy(console->title, title);
-                    break;
-                }
-			}
-		}
-	}
-#ifdef SUPPORT_CMD
-	if( console->hwnd==NULL )
-	{
-		HWND hwnd = NULL;
-    
-		while( hwnd=FindWindowEx(hwnd, NULL, "ConsoleWindowClass",NULL) )
-		{
-			GetWindowText(hwnd, title, 1024);
-			if( !strncmp(title, base_title, strlen(base_title)) )
-			{
-                DWORD pid = 0;
-                GetWindowThreadProcessId(hwnd, &pid);
-                if(pid == console->dwProcessId)
-                {
-    				console->hwnd = hwnd;
-    				strcpy(console->title, title);
-                    break;
-                }
-			}
-		}
-	}
-	else
-	{
-		GetWindowText(console->hwnd, title, 1024);
-		if( strcmp(title, console->title) )
-		{
-			strcpy(console->title, title);
-		}
-        if( strcmp(console->title, base_title) )
-        {
-            need_echo = 0;
-        } else {
-            need_echo = 1;
-        }
-	}
-
-    // lost console
-    if( console->hwnd==NULL )
-    {
-        logevent(console->frontend, "Error reading from console device");
-        return 0;
-    }
-        
     if (need_echo)
     {
-        if(console->hToRead)
-            WriteFile(console->hToRead, buf, len, &ret, NULL);
+        key_process(cmd_buf, buf, len);
         
-        strncpy(cmd+cmd_len, buf, len);
+        EnterCriticalSection(&CriticalSection);
+        if(console->hServerWrite)
+            WriteFile(console->hServerWrite, buf, len, &ret, NULL);
+        LeaveCriticalSection(&CriticalSection);
+        
+        strncpy(cmd_buf+cmd_len, buf, len);
         cmd_len += len;
-        if(cmd[cmd_len-1] == '\r')
+        if(cmd_buf[cmd_len-1] == '\r')
         {
-            cmd[cmd_len] = '\n';
-            cmd[cmd_len+1] = 0;
+            cmd_buf[cmd_len] = '\n';
+            cmd_buf[cmd_len+1] = 0;
             ++cmd_len;
-            console->bufsize = handle_write(console->out, cmd, cmd_len);
-            cmd[0] = 0;
+            console->bufsize = handle_write(console->out, cmd_buf, cmd_len);
+            cmd_buf[0] = 0;
             cmd_len = 0;
-            return console->bufsize;
         }
-        return 0;
+        else
+            console->bufsize = 0;
     }
     else
     {
-        cmd[0] = 0;
-        cmd_len = 0;
-    }
-#else
-    strncpy(cmd+cmd_len, buf, len);
-    cmd_len += len;
-    if(cmd[cmd_len-1] == '\r')
-    {
-        cmd[cmd_len] = '\n';
-        cmd[cmd_len+1] = 0;
-        ++cmd_len;
-        if(!strncmp(cmd, "exit", 4))
+        if(buf[len-1] == '\r')
         {
+            buf[len] = '\n';
+            buf[++len] = 0;
         }
-        cmd[0] = 0;
-        cmd_len = 0;
-    }
-#endif
 
-    if(buf[len-1] == '\r')
-    {
-        buf[len] = '\n';
-        buf[len+1] = 0;
-        ++len;
+        console->bufsize = handle_write(console->out, buf, len);
     }
-
-    console->bufsize = handle_write(console->out, buf, len);
 
     return console->bufsize;
 }
@@ -431,8 +490,8 @@ static void console_provide_logctx(void *handle, void *logctx)
 static int console_exitcode(void *handle)
 {
     Console console = (Console) handle;
-    if (console->hWrite != INVALID_HANDLE_VALUE
-        || console->hRead != INVALID_HANDLE_VALUE)
+    if (console->hClientWrite != INVALID_HANDLE_VALUE
+        || console->hClientRead != INVALID_HANDLE_VALUE)
         return -1;                     /* still connected */
     else
         /* Exit codes are a meaningless concept with console ports */
