@@ -8,15 +8,66 @@
 
 #include "putty.h"
 
+//#define SUPPORT_CMD
+
 typedef struct console_backend_data {
-    HANDLE hRead, hWrite;
+    HANDLE hRead, hWrite, hToRead;
     struct handle *out, *in;
+    DWORD dwProcessId;
+    HWND hwnd;
+	char title[1024];
     void *frontend;
     int bufsize;
 } *Console;
 
+static const char* base_title = "PuTTY Plus Console";
+#ifdef SUPPORT_CMD
+static int need_echo = 1;
+#endif
+
 static void console_terminate(Console console)
 {
+//	int ret;
+//    WriteFile(console->hWrite, "exit\n", strlen("exit\n"), &ret, NULL);
+//	Sleep(200);
+	if( console->dwProcessId!=(DWORD)(-1) )
+	{
+		HANDLE hProcess = OpenProcess( PROCESS_ALL_ACCESS, FALSE, console->dwProcessId );
+		if( hProcess )
+		{
+            DWORD dwExitCode = 0;
+			TerminateProcess( hProcess,0 );
+            WaitForSingleObject(hProcess, INFINITE);
+            GetExitCodeProcess(hProcess, &dwExitCode);
+			CloseHandle( hProcess );
+		}
+        console->dwProcessId = (DWORD)(-1);
+	}
+    
+    if (console->hToRead != INVALID_HANDLE_VALUE) {
+        if( !CloseHandle(console->hToRead) )
+        {
+            MessageBox(NULL, "CloseHandle(console->hToRead)", "", MB_OK);
+        }
+    	console->hToRead = INVALID_HANDLE_VALUE;
+        Sleep(200);
+    }
+    
+    if (console->hWrite != INVALID_HANDLE_VALUE) {
+        if( !CloseHandle(console->hWrite) )
+        {
+            MessageBox(NULL, "CloseHandle(console->hWrite)", "", MB_OK);
+        }
+    	console->hWrite = INVALID_HANDLE_VALUE;
+    }
+    if (console->hRead != INVALID_HANDLE_VALUE) {
+    	if( !CloseHandle(console->hRead) )
+    	{
+            MessageBox(NULL, "CloseHandle(console->hRead)", "", MB_OK);
+    	}
+    	console->hRead = INVALID_HANDLE_VALUE;
+    }
+
     if (console->out) {
     	handle_free(console->out);
     	console->out = NULL;
@@ -24,14 +75,6 @@ static void console_terminate(Console console)
     if (console->in) {
     	handle_free(console->in);
     	console->in = NULL;
-    }
-    if (console->hWrite != INVALID_HANDLE_VALUE) {
-    	CloseHandle(console->hWrite);
-    	console->hWrite = INVALID_HANDLE_VALUE;
-    }
-    if (console->hRead != INVALID_HANDLE_VALUE) {
-    	CloseHandle(console->hRead);
-    	console->hRead = INVALID_HANDLE_VALUE;
     }
 }
 
@@ -84,8 +127,6 @@ static void console_sentdata(struct handle *h, int new_backlog)
  * Also places the canonical host name into `realhost'. It must be
  * freed by the caller.
  */
-    HANDLE  hClientRead,hServerWrite;
-    HANDLE  hClientWrite,hServerRead;
 static const char *console_init(void *frontend_handle, void **backend_handle,
 			       Conf *conf, char *host, int port,
 			       char **realhost, int nodelay, int keepalive)
@@ -94,12 +135,17 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
     SECURITY_ATTRIBUTES sa;
 	STARTUPINFO si;
 	PROCESS_INFORMATION pi;
+    HANDLE  hClientRead,hServerWrite;
+    HANDLE  hClientWrite,hServerRead;
+	char shellCmd[_MAX_PATH];
     
     console = snew(struct console_backend_data);
     console->out = console->in = NULL;
     console->bufsize = 0;
     *backend_handle = console;
     console->frontend = frontend_handle;
+    console->dwProcessId = (DWORD)(-1);
+	console->hwnd = NULL;
     
     sa.nLength = sizeof(SECURITY_ATTRIBUTES);
     sa.lpSecurityDescriptor = NULL;
@@ -115,26 +161,52 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
 
 	GetStartupInfo(&si);
 	si.dwFlags = STARTF_USESHOWWINDOW|STARTF_USESTDHANDLES;
-	si.wShowWindow = SW_HIDE;   
+	si.wShowWindow = SW_SHOWNORMAL;//SW_HIDE;   
 	si.hStdOutput = hServerWrite;
 	si.hStdError = hServerWrite;
 	si.hStdInput = hServerRead;
+    si.lpTitle = base_title;
 
-	if( !CreateProcess(NULL, "cmd.exe", NULL, NULL, TRUE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi) )
+	if( !GetEnvironmentVariable(("ComSpec"), shellCmd, _MAX_PATH) )
+		  return "Can not found cmd.exe";
+    
+	strcat( shellCmd, (" /A /C d:\\rockadb\\tools\\adb.exe shell") );//
+
+	if( !CreateProcess(NULL, shellCmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi) )
 	{
         return "Create process failed!";
 	}
-//    CloseHandle(hServerRead);
-//    CloseHandle(hServerWrite);
-    
+    if( !CloseHandle(pi.hProcess) )
+    {
+        return "CloseHandle(pi.hProcess) failed!";
+    }
+    if( !CloseHandle(pi.hThread) )
+    {
+        return "CloseHandle(pi.hThread) failed!";
+    }
+    if( !CloseHandle(hServerRead) )
+    {
+        return "CloseHandle(hServerRead) failed!";
+    }
+
+    console->dwProcessId = pi.dwProcessId;
     console->hRead = hClientRead;
     console->hWrite = hClientWrite;
+    console->hToRead = hServerWrite;
+    #if 0
     console->out = handle_output_new(console->hWrite, console_sentdata, console,
 				    HANDLE_FLAG_OVERLAPPED);
     console->in = handle_input_new(console->hRead, console_gotdata, console,
 				  HANDLE_FLAG_OVERLAPPED |
 				  HANDLE_FLAG_IGNOREEOF |
 				  HANDLE_FLAG_UNITBUFFER);
+    #else
+    console->out = handle_output_new(console->hWrite, console_sentdata, console, 0);
+    console->in = handle_input_new(console->hRead, console_gotdata, console, HANDLE_FLAG_IGNOREEOF);
+    #endif
+#ifdef SUPPORT_CMD
+    need_echo = 1;
+#endif
     
     *realhost = dupstr("Console");
     update_specials_menu(console->frontend);
@@ -154,6 +226,8 @@ static void console_reconfig(void *handle, Conf *conf)
 {
 }
 
+char cmd[1024] = "\0";
+int cmd_len = 0;
 /*
  * Called to send data down the console connection.
  */
@@ -161,9 +235,113 @@ static int console_send(void *handle, char *buf, int len)
 {
     Console console = (Console) handle;
     int ret = 0;
+	char title[1024];
 
     if (console->out == NULL)
     	return 0;
+
+	if( console->hwnd==NULL )
+	{
+		HWND hwnd = NULL;
+    
+		while( hwnd=FindWindowEx(hwnd, NULL, "ConsoleWindowClass",NULL) )
+		{
+			GetWindowText(hwnd, title, 1024);
+			if( !strncmp(title, base_title, strlen(base_title)) )
+			{
+                DWORD pid = 0;
+                GetWindowThreadProcessId(hwnd, &pid);
+                if(pid == console->dwProcessId)
+                {
+    				console->hwnd = hwnd;
+    				strcpy(console->title, title);
+                    break;
+                }
+			}
+		}
+	}
+#ifdef SUPPORT_CMD
+	if( console->hwnd==NULL )
+	{
+		HWND hwnd = NULL;
+    
+		while( hwnd=FindWindowEx(hwnd, NULL, "ConsoleWindowClass",NULL) )
+		{
+			GetWindowText(hwnd, title, 1024);
+			if( !strncmp(title, base_title, strlen(base_title)) )
+			{
+                DWORD pid = 0;
+                GetWindowThreadProcessId(hwnd, &pid);
+                if(pid == console->dwProcessId)
+                {
+    				console->hwnd = hwnd;
+    				strcpy(console->title, title);
+                    break;
+                }
+			}
+		}
+	}
+	else
+	{
+		GetWindowText(console->hwnd, title, 1024);
+		if( strcmp(title, console->title) )
+		{
+			strcpy(console->title, title);
+		}
+        if( strcmp(console->title, base_title) )
+        {
+            need_echo = 0;
+        } else {
+            need_echo = 1;
+        }
+	}
+
+    // lost console
+    if( console->hwnd==NULL )
+    {
+        logevent(console->frontend, "Error reading from console device");
+        return 0;
+    }
+        
+    if (need_echo)
+    {
+        if(console->hToRead)
+            WriteFile(console->hToRead, buf, len, &ret, NULL);
+        
+        strncpy(cmd+cmd_len, buf, len);
+        cmd_len += len;
+        if(cmd[cmd_len-1] == '\r')
+        {
+            cmd[cmd_len] = '\n';
+            cmd[cmd_len+1] = 0;
+            ++cmd_len;
+            console->bufsize = handle_write(console->out, cmd, cmd_len);
+            cmd[0] = 0;
+            cmd_len = 0;
+            return console->bufsize;
+        }
+        return 0;
+    }
+    else
+    {
+        cmd[0] = 0;
+        cmd_len = 0;
+    }
+#else
+    strncpy(cmd+cmd_len, buf, len);
+    cmd_len += len;
+    if(cmd[cmd_len-1] == '\r')
+    {
+        cmd[cmd_len] = '\n';
+        cmd[cmd_len+1] = 0;
+        ++cmd_len;
+        if(!strncmp(cmd, "exit", 4))
+        {
+        }
+        cmd[0] = 0;
+        cmd_len = 0;
+    }
+#endif
 
     if(buf[len-1] == '\r')
     {
@@ -172,8 +350,8 @@ static int console_send(void *handle, char *buf, int len)
         ++len;
     }
 
-//	WriteFile(hServerWrite, buf, len, &ret, NULL);
     console->bufsize = handle_write(console->out, buf, len);
+
     return console->bufsize;
 }
 
@@ -229,7 +407,7 @@ static void console_unthrottle(void *handle, int backlog)
 {
     Console console = (Console) handle;
     if (console->in)
-	handle_unthrottle(console->in, backlog);
+    	handle_unthrottle(console->in, backlog);
 }
 
 static int console_ldisc(void *handle, int option)

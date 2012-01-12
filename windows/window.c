@@ -219,7 +219,7 @@ char *get_ttymode(void *frontend, const char *mode)
     return term_get_ttymode(term, mode);
 }
 
-//#define USE_ECHO
+#define USE_ECHO
 static void close_session(void);
 
 static void start_backend(void)
@@ -896,6 +896,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     }
 
     finished:
+    close_session();
     cleanup_exit(msg.wParam);	       /* this doesn't return... */
     return msg.wParam;		       /* ... but optimiser doesn't know */
 }
