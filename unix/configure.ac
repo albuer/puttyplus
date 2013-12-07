@@ -85,7 +85,15 @@ case "$gtk_version_desired:$gtk" in
   1:none | any:none)
     ifdef([AM_PATH_GTK],[
     AM_PATH_GTK([1.2.0], [gtk=1], [])
-    ],[AC_WARNING([generating configure script without GTK 1 autodetection])])
+    ],[
+    # manual check for gtk1
+    AC_PATH_PROG(GTK1_CONFIG, gtk-config, absent)
+    if test "$GTK1_CONFIG" != "absent"; then
+      GTK_CFLAGS=`"$GTK1_CONFIG" --cflags`
+      GTK_LIBS=`"$GTK1_CONFIG" --libs`
+      gtk=1
+    fi
+    ])
     ;;
 esac
 
@@ -118,7 +126,17 @@ AC_CHECK_LIB(X11, XOpenDisplay,
              [GTK_LIBS="-lX11 $GTK_LIBS"
               AC_DEFINE([HAVE_LIBX11],[],[Define if libX11.a is available])])
 
-AC_CHECK_FUNCS([getaddrinfo ptsname setresuid strsignal updwtmpx])
+AC_CHECK_FUNCS([getaddrinfo posix_openpt ptsname setresuid strsignal updwtmpx])
+AC_CHECK_DECLS([CLOCK_MONOTONIC], [], [], [[#include <time.h>]])
+AC_SEARCH_LIBS([clock_gettime], [rt], [AC_DEFINE([HAVE_CLOCK_GETTIME],[],[Define if clock_gettime() is available])])
+
+if test "x$GCC" = "xyes"; then
+  :
+  AC_SUBST(WARNINGOPTS, ['-Wall -Werror'])
+else
+  :
+  AC_SUBST(WARNINGOPTS, [])
+fi
 
 AC_OUTPUT
 

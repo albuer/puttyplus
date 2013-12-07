@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <errno.h>
+#include <locale.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -24,7 +25,13 @@
 #include <X11/Xutil.h>
 #include <X11/Xatom.h>
 
+#if GTK_CHECK_VERSION(2,0,0)
+#include <gtk/gtkimmodule.h>
+#endif
+
 #define PUTTY_DO_GLOBALS	       /* actually _define_ globals */
+
+#define MAY_REFER_TO_GTK_IN_HEADERS
 
 #include "putty.h"
 #include "terminal.h"
@@ -68,6 +75,9 @@ struct gui_data {
 	*restartitem;
     GtkWidget *sessionsmenu;
     GdkPixmap *pixmap;
+#if GTK_CHECK_VERSION(2,0,0)
+    GtkIMContext *imc;
+#endif
     unifont *fonts[4];                 /* normal, bold, wide, widebold */
     int xpos, ypos, gotpos, gravity;
     GdkCursor *rawcursor, *textcursor, *blankcursor, *waitcursor, *currcursor;
@@ -104,14 +114,14 @@ struct gui_data {
     guint32 input_event_time; /* Timestamp of the most recent input event. */
     int reconfiguring;
     /* Cached things out of conf that we refer to a lot */
-    int bold_colour;
+    int bold_style;
     int window_border;
     int cursor_type;
 };
 
 static void cache_conf_values(struct gui_data *inst)
 {
-    inst->bold_colour = conf_get_int(inst->conf, CONF_bold_colour);
+    inst->bold_style = conf_get_int(inst->conf, CONF_bold_style);
     inst->window_border = conf_get_int(inst->conf, CONF_window_border);
     inst->cursor_type = conf_get_int(inst->conf, CONF_cursor_type);
 }
@@ -489,6 +499,10 @@ gint configure_area(GtkWidget *widget, GdkEventConfigure *event, gpointer data)
     if (inst->term)
 	term_invalidate(inst->term);
 
+#if GTK_CHECK_VERSION(2,0,0)
+    gtk_im_context_set_client_window(inst->imc, widget->window);
+#endif
+
     return TRUE;
 }
 
@@ -520,6 +534,7 @@ gint key_event(GtkWidget *widget, GdkEventKey *event, gpointer data)
     char output[256];
     wchar_t ucsoutput[2];
     int ucsval, start, end, special, output_charset, use_ucsoutput;
+    int nethack_mode, app_keypad_mode;
 
     /* Remember the timestamp. */
     inst->input_event_time = event->time;
@@ -539,21 +554,26 @@ gint key_event(GtkWidget *widget, GdkEventKey *event, gpointer data)
      * inconvenience in having to type a zero before a single-digit
      * character code.
      */
-    if (event->type == GDK_KEY_RELEASE &&
-	(event->keyval == GDK_Meta_L || event->keyval == GDK_Alt_L ||
-	 event->keyval == GDK_Meta_R || event->keyval == GDK_Alt_R) &&
-	inst->alt_keycode >= 0 && inst->alt_digits > 1) {
+    if (event->type == GDK_KEY_RELEASE) {
+        if ((event->keyval == GDK_Meta_L || event->keyval == GDK_Alt_L ||
+             event->keyval == GDK_Meta_R || event->keyval == GDK_Alt_R) &&
+            inst->alt_keycode >= 0 && inst->alt_digits > 1) {
 #ifdef KEY_DEBUGGING
-	printf("Alt key up, keycode = %d\n", inst->alt_keycode);
+            printf("Alt key up, keycode = %d\n", inst->alt_keycode);
 #endif
-	/*
-	 * FIXME: we might usefully try to do something clever here
-	 * about interpreting the generated key code in a way that's
-	 * appropriate to the line code page.
-	 */
-	output[0] = inst->alt_keycode;
-	end = 1;
-	goto done;
+            /*
+             * FIXME: we might usefully try to do something clever here
+             * about interpreting the generated key code in a way that's
+             * appropriate to the line code page.
+             */
+            output[0] = inst->alt_keycode;
+            end = 1;
+            goto done;
+        }
+#if GTK_CHECK_VERSION(2,0,0)
+        if (gtk_im_context_filter_keypress(inst->imc, event))
+            return TRUE;
+#endif
     }
 
     if (event->type == GDK_KEY_PRESS) {
@@ -656,6 +676,10 @@ gint key_event(GtkWidget *widget, GdkEventKey *event, gpointer data)
 	special = FALSE;
 	use_ucsoutput = FALSE;
 
+        nethack_mode = conf_get_int(inst->conf, CONF_nethack_keypad);
+        app_keypad_mode = (inst->term->app_keypad_keys &&
+                           !conf_get_int(inst->conf, CONF_no_applic_k));
+
 	/* ALT+things gives leading Escape. */
 	output[0] = '\033';
 #if !GTK_CHECK_VERSION(2,0,0)
@@ -669,12 +693,72 @@ gint key_event(GtkWidget *widget, GdkEventKey *event, gpointer data)
 	output_charset = CS_ISO8859_1;
 	strncpy(output+1, event->string, lenof(output)-1);
 #else
+        /*
+         * Most things can now be passed to
+         * gtk_im_context_filter_keypress without breaking anything
+         * below this point. An exception is the numeric keypad if
+         * we're in Nethack or application mode: the IM will eat
+         * numeric keypad presses if Num Lock is on, but we don't want
+         * it to.
+         */
+	if (app_keypad_mode &&
+            (event->keyval == GDK_Num_Lock ||
+             event->keyval == GDK_KP_Divide ||
+             event->keyval == GDK_KP_Multiply ||
+             event->keyval == GDK_KP_Subtract ||
+             event->keyval == GDK_KP_Add ||
+             event->keyval == GDK_KP_Enter ||
+             event->keyval == GDK_KP_0 ||
+             event->keyval == GDK_KP_Insert ||
+             event->keyval == GDK_KP_1 ||
+             event->keyval == GDK_KP_End ||
+             event->keyval == GDK_KP_2 ||
+             event->keyval == GDK_KP_Down ||
+             event->keyval == GDK_KP_3 ||
+             event->keyval == GDK_KP_Page_Down ||
+             event->keyval == GDK_KP_4 ||
+             event->keyval == GDK_KP_Left ||
+             event->keyval == GDK_KP_5 ||
+             event->keyval == GDK_KP_Begin ||
+             event->keyval == GDK_KP_6 ||
+             event->keyval == GDK_KP_Right ||
+             event->keyval == GDK_KP_7 ||
+             event->keyval == GDK_KP_Home ||
+             event->keyval == GDK_KP_8 ||
+             event->keyval == GDK_KP_Up ||
+             event->keyval == GDK_KP_9 ||
+             event->keyval == GDK_KP_Page_Up ||
+             event->keyval == GDK_KP_Decimal ||
+             event->keyval == GDK_KP_Delete)) {
+            /* app keypad; do nothing */
+        } else if (nethack_mode &&
+                   (event->keyval == GDK_KP_1 ||
+                    event->keyval == GDK_KP_End ||
+                    event->keyval == GDK_KP_2 ||
+                    event->keyval == GDK_KP_Down ||
+                    event->keyval == GDK_KP_3 ||
+                    event->keyval == GDK_KP_Page_Down ||
+                    event->keyval == GDK_KP_4 ||
+                    event->keyval == GDK_KP_Left ||
+                    event->keyval == GDK_KP_5 ||
+                    event->keyval == GDK_KP_Begin ||
+                    event->keyval == GDK_KP_6 ||
+                    event->keyval == GDK_KP_Right ||
+                    event->keyval == GDK_KP_7 ||
+                    event->keyval == GDK_KP_Home ||
+                    event->keyval == GDK_KP_8 ||
+                    event->keyval == GDK_KP_Up ||
+                    event->keyval == GDK_KP_9 ||
+                    event->keyval == GDK_KP_Page_Up)) {
+            /* nethack mode; do nothing */
+        } else {
+            if (gtk_im_context_filter_keypress(inst->imc, event))
+                return TRUE;
+        }
+
 	/*
 	 * GDK 2.0 arranges to have done some translation for us: in
 	 * GDK 2.0, event->string is encoded in the current locale.
-	 *
-	 * (However, it's also deprecated; we really ought to be
-	 * using a GTKIMContext.)
 	 *
 	 * So we use the standard C library function mbstowcs() to
 	 * convert from the current locale into Unicode; from there
@@ -800,7 +884,7 @@ gint key_event(GtkWidget *widget, GdkEventKey *event, gpointer data)
 	/*
 	 * NetHack keypad mode.
 	 */
-	if (conf_get_int(inst->conf, CONF_nethack_keypad)) {
+	if (nethack_mode) {
 	    char *keys = NULL;
 	    switch (event->keyval) {
 	      case GDK_KP_1: case GDK_KP_End: keys = "bB\002"; break;
@@ -829,8 +913,7 @@ gint key_event(GtkWidget *widget, GdkEventKey *event, gpointer data)
 	/*
 	 * Application keypad mode.
 	 */
-	if (inst->term->app_keypad_keys &&
-	    !conf_get_int(inst->conf, CONF_no_applic_k)) {
+	if (app_keypad_mode) {
 	    int xkey = 0;
 	    switch (event->keyval) {
 	      case GDK_Num_Lock: xkey = 'P'; break;
@@ -1136,6 +1219,17 @@ gint key_event(GtkWidget *widget, GdkEventKey *event, gpointer data)
     return TRUE;
 }
 
+#if GTK_CHECK_VERSION(2,0,0)
+void input_method_commit_event(GtkIMContext *imc, gchar *str, gpointer data)
+{
+    struct gui_data *inst = (struct gui_data *)data;
+    if (inst->ldisc)
+        lpage_send(inst->ldisc, CS_UTF8, str, strlen(str), 1);
+    show_mouseptr(inst, 0);
+    term_seen_key_event(inst->term);
+}
+#endif
+
 gboolean button_internal(struct gui_data *inst, guint32 timestamp,
 			 GdkEventType type, guint ebutton, guint state,
 			 gdouble ex, gdouble ey)
@@ -1267,7 +1361,7 @@ void frontend_keypress(void *handle)
      * any keypress.
      */
     if (inst->exited)
-	exit(0);
+	cleanup_exit(0);
 }
 
 static gint idle_exit_func(gpointer data)
@@ -1286,13 +1380,11 @@ static gint idle_exit_func(gpointer data)
 	    ldisc_free(inst->ldisc);
 	    inst->ldisc = NULL;
 	}
-	if (inst->back) {
-	    inst->back->free(inst->backhandle);
-	    inst->backhandle = NULL;
-	    inst->back = NULL;
-            term_provide_resize_fn(inst->term, NULL, NULL);
-	    update_specials_menu(inst);
-	}
+        inst->back->free(inst->backhandle);
+        inst->backhandle = NULL;
+        inst->back = NULL;
+        term_provide_resize_fn(inst->term, NULL, NULL);
+        update_specials_menu(inst);
 	gtk_widget_set_sensitive(inst->restartitem, TRUE);
     }
 
@@ -1309,13 +1401,18 @@ void notify_remote_exit(void *frontend)
 
 static gint timer_trigger(gpointer data)
 {
-    long now = GPOINTER_TO_LONG(data);
-    long next;
+    unsigned long now = GPOINTER_TO_LONG(data);
+    unsigned long next, then;
     long ticks;
 
     if (run_timers(now, &next)) {
-	ticks = next - GETTICKCOUNT();
-	timer_id = gtk_timeout_add(ticks > 0 ? ticks : 1, timer_trigger,
+	then = now;
+	now = GETTICKCOUNT();
+	if (now - then > next - then)
+	    ticks = 0;
+	else
+	    ticks = next - now;
+	timer_id = gtk_timeout_add(ticks, timer_trigger,
 				   LONG_TO_GPOINTER(next));
     }
 
@@ -1326,7 +1423,7 @@ static gint timer_trigger(gpointer data)
     return FALSE;
 }
 
-void timer_change_notify(long next)
+void timer_change_notify(unsigned long next)
 {
     long ticks;
 
@@ -1499,7 +1596,7 @@ void palette_set(void *frontend, int n, int r, int g, int b)
     struct gui_data *inst = (struct gui_data *)frontend;
     if (n >= 16)
 	n += 256 - 16;
-    if (n > NALLCOLOURS)
+    if (n >= NALLCOLOURS)
 	return;
     real_palette_set(inst, n, r, g, b);
     if (n == 258) {
@@ -2061,11 +2158,11 @@ void do_text_internal(Context ctx, int x, int y, wchar_t *text, int len,
 	nfg = nbg;
 	nbg = t;
     }
-    if (inst->bold_colour && (attr & ATTR_BOLD)) {
+    if ((inst->bold_style & 2) && (attr & ATTR_BOLD)) {
 	if (nfg < 16) nfg |= 8;
 	else if (nfg >= 256) nfg |= 1;
     }
-    if (inst->bold_colour && (attr & ATTR_BLINK)) {
+    if ((inst->bold_style & 2) && (attr & ATTR_BLINK)) {
 	if (nbg < 16) nbg |= 8;
 	else if (nbg >= 256) nbg |= 1;
     }
@@ -2083,7 +2180,7 @@ void do_text_internal(Context ctx, int x, int y, wchar_t *text, int len,
 	widefactor = 1;
     }
 
-    if ((attr & ATTR_BOLD) && !inst->bold_colour) {
+    if ((attr & ATTR_BOLD) && (inst->bold_style & 1)) {
 	bold = 1;
 	fontid |= 1;
     } else {
@@ -2328,6 +2425,17 @@ void do_cursor(Context ctx, int x, int y, wchar_t *text, int len,
 		    x*inst->font_width+inst->window_border,
 		    y*inst->font_height+inst->window_border,
 		    len*widefactor*inst->font_width, inst->font_height);
+
+#if GTK_CHECK_VERSION(2,0,0)
+    {
+        GdkRectangle cursorrect;
+        cursorrect.x = x*inst->font_width+inst->window_border;
+        cursorrect.y = y*inst->font_height+inst->window_border;
+        cursorrect.width = len*widefactor*inst->font_width;
+        cursorrect.height = inst->font_height;
+        gtk_im_context_set_cursor_location(inst->imc, &cursorrect);
+    }
+#endif
 }
 
 GdkCursor *make_mouse_ptr(struct gui_data *inst, int cursor_val)
@@ -2480,6 +2588,13 @@ static void help(FILE *fp) {
 "  -xrm RESOURCE-STRING      Set an X resource\n"
 "  -e COMMAND [ARGS...]      Execute command (consumes all remaining args)\n"
 	 ) < 0 || fflush(fp) < 0) {
+	perror("output error");
+	exit(1);
+    }
+}
+
+static void version(FILE *fp) {
+    if(fprintf(fp, "%s: %s\n", appname, ver) < 0 || fflush(fp) < 0) {
 	perror("output error");
 	exit(1);
     }
@@ -2694,6 +2809,10 @@ int do_cmdline(int argc, char **argv, int do_everything, int *allow_launch,
 	    help(stdout);
 	    exit(0);
 
+	} else if(!strcmp(p, "-version") || !strcmp(p, "--version")) {
+	    version(stdout);
+	    exit(0);
+
         } else if (!strcmp(p, "-pgpfp")) {
             pgp_fingerprints();
             exit(1);
@@ -2743,67 +2862,72 @@ void frontend_net_error_pending(void)
     }
 }
 
-void setup_fonts_ucs(struct gui_data *inst)
+char *setup_fonts_ucs(struct gui_data *inst)
 {
     int shadowbold = conf_get_int(inst->conf, CONF_shadowbold);
     int shadowboldoffset = conf_get_int(inst->conf, CONF_shadowboldoffset);
     FontSpec *fs;
-
-    if (inst->fonts[0])
-        unifont_destroy(inst->fonts[0]);
-    if (inst->fonts[1])
-        unifont_destroy(inst->fonts[1]);
-    if (inst->fonts[2])
-        unifont_destroy(inst->fonts[2]);
-    if (inst->fonts[3])
-        unifont_destroy(inst->fonts[3]);
+    unifont *fonts[4];
+    int i;
 
     fs = conf_get_fontspec(inst->conf, CONF_font);
-    inst->fonts[0] = multifont_create(inst->area, fs->name, FALSE, FALSE,
-                                      shadowboldoffset, shadowbold);
-    if (!inst->fonts[0]) {
-	fprintf(stderr, "%s: unable to load font \"%s\"\n", appname,
-		fs->name);
-	exit(1);
+    fonts[0] = multifont_create(inst->area, fs->name, FALSE, FALSE,
+                                shadowboldoffset, shadowbold);
+    if (!fonts[0]) {
+        return dupprintf("unable to load font \"%s\"", fs->name);
     }
 
     fs = conf_get_fontspec(inst->conf, CONF_boldfont);
     if (shadowbold || !fs->name[0]) {
-	inst->fonts[1] = NULL;
+	fonts[1] = NULL;
     } else {
-	inst->fonts[1] = multifont_create(inst->area, fs->name, FALSE, TRUE,
-                                          shadowboldoffset, shadowbold);
-	if (!inst->fonts[1]) {
-	    fprintf(stderr, "%s: unable to load bold font \"%s\"\n", appname,
-		    fs->name);
-	    exit(1);
+	fonts[1] = multifont_create(inst->area, fs->name, FALSE, TRUE,
+                                    shadowboldoffset, shadowbold);
+	if (!fonts[1]) {
+            if (fonts[0])
+                unifont_destroy(fonts[0]);
+	    return dupprintf("unable to load bold font \"%s\"", fs->name);
 	}
     }
 
     fs = conf_get_fontspec(inst->conf, CONF_widefont);
     if (fs->name[0]) {
-	inst->fonts[2] = multifont_create(inst->area, fs->name, TRUE, FALSE,
-                                          shadowboldoffset, shadowbold);
-	if (!inst->fonts[2]) {
-	    fprintf(stderr, "%s: unable to load wide font \"%s\"\n", appname,
-		    fs->name);
-	    exit(1);
+	fonts[2] = multifont_create(inst->area, fs->name, TRUE, FALSE,
+                                    shadowboldoffset, shadowbold);
+	if (!fonts[2]) {
+            for (i = 0; i < 2; i++)
+                if (fonts[i])
+                    unifont_destroy(fonts[i]);
+            return dupprintf("%s: unable to load wide font \"%s\"", fs->name);
 	}
     } else {
-	inst->fonts[2] = NULL;
+	fonts[2] = NULL;
     }
 
     fs = conf_get_fontspec(inst->conf, CONF_wideboldfont);
     if (shadowbold || !fs->name[0]) {
-	inst->fonts[3] = NULL;
+	fonts[3] = NULL;
     } else {
-	inst->fonts[3] = multifont_create(inst->area, fs->name, TRUE, TRUE,
-                                          shadowboldoffset, shadowbold);
-	if (!inst->fonts[3]) {
-	    fprintf(stderr, "%s: unable to load wide bold font \"%s\"\n", appname,
-		    fs->name);
-	    exit(1);
+	fonts[3] = multifont_create(inst->area, fs->name, TRUE, TRUE,
+                                    shadowboldoffset, shadowbold);
+	if (!fonts[3]) {
+            for (i = 0; i < 3; i++)
+                if (fonts[i])
+                    unifont_destroy(fonts[i]);
+	    return dupprintf("%s: unable to load wide bold font \"%s\"",
+                             fs->name);
 	}
+    }
+
+    /*
+     * Now we've got past all the possible error conditions, we can
+     * actually update our state.
+     */
+
+    for (i = 0; i < 4; i++) {
+        if (inst->fonts[i])
+            unifont_destroy(inst->fonts[i]);
+        inst->fonts[i] = fonts[i];
     }
 
     inst->font_width = inst->fonts[0]->width;
@@ -2814,6 +2938,8 @@ void setup_fonts_ucs(struct gui_data *inst)
 				    conf_get_int(inst->conf, CONF_utf8_override),
 				    inst->fonts[0]->public_charset,
 				    conf_get_int(inst->conf, CONF_vtmode));
+
+    return NULL;
 }
 
 void set_geom_hints(struct gui_data *inst)
@@ -2883,7 +3009,7 @@ void change_settings_menuitem(GtkMenuItem *item, gpointer data)
 	4, 12, 5, 13, 6, 14, 7, 15
     };
     struct gui_data *inst = (struct gui_data *)data;
-    char *title = dupcat(appname, " Reconfiguration", NULL);
+    char *title;
     Conf *oldconf, *newconf;
     int i, j, need_size;
 
@@ -2893,6 +3019,8 @@ void change_settings_menuitem(GtkMenuItem *item, gpointer data)
       return;
     else
       inst->reconfiguring = TRUE;
+
+    title = dupcat(appname, " Reconfiguration", NULL);
 
     oldconf = inst->conf;
     newconf = conf_copy(inst->conf);
@@ -2907,9 +3035,10 @@ void change_settings_menuitem(GtkMenuItem *item, gpointer data)
          * Flush the line discipline's edit buffer in the case
          * where local editing has just been disabled.
          */
-	ldisc_configure(inst->ldisc, inst->conf);
-        if (inst->ldisc)
+        if (inst->ldisc) {
+            ldisc_configure(inst->ldisc, inst->conf);
 	    ldisc_send(inst->ldisc, NULL, 0, 0);
+        }
         /* Pass new config data to the terminal */
         term_reconfig(inst->term, inst->conf);
         /* Pass new config data to the back end */
@@ -2942,7 +3071,7 @@ void change_settings_menuitem(GtkMenuItem *item, gpointer data)
 		 * repaint the space in between the window border
 		 * and the text area.
 		 */
-		if (i == 258) {
+		if (ww[i] == 258) {
 		    set_window_background(inst);
 		    draw_backing_rect(inst);
 		}
@@ -2979,6 +3108,7 @@ void change_settings_menuitem(GtkMenuItem *item, gpointer data)
          * Redo the whole tangled fonts and Unicode mess if
          * necessary.
          */
+        need_size = FALSE;
         if (strcmp(conf_get_fontspec(oldconf, CONF_font)->name,
 		   conf_get_fontspec(newconf, CONF_font)->name) ||
 	    strcmp(conf_get_fontspec(oldconf, CONF_boldfont)->name,
@@ -2989,16 +3119,29 @@ void change_settings_menuitem(GtkMenuItem *item, gpointer data)
 		   conf_get_fontspec(newconf, CONF_wideboldfont)->name) ||
 	    strcmp(conf_get_str(oldconf, CONF_line_codepage),
 		   conf_get_str(newconf, CONF_line_codepage)) ||
+	    conf_get_int(oldconf, CONF_utf8_override) !=
+	    conf_get_int(newconf, CONF_utf8_override) ||
 	    conf_get_int(oldconf, CONF_vtmode) !=
 	    conf_get_int(newconf, CONF_vtmode) ||
 	    conf_get_int(oldconf, CONF_shadowbold) !=
 	    conf_get_int(newconf, CONF_shadowbold) ||
 	    conf_get_int(oldconf, CONF_shadowboldoffset) !=
 	    conf_get_int(newconf, CONF_shadowboldoffset)) {
-            setup_fonts_ucs(inst);
-            need_size = 1;
-        } else
-            need_size = 0;
+            char *errmsg = setup_fonts_ucs(inst);
+            if (errmsg) {
+                char *msgboxtext =
+                    dupprintf("Could not change fonts in terminal window: %s\n",
+                              errmsg);
+                messagebox(inst->window, "Font setup error", msgboxtext,
+                           string_width("Could not change fonts in terminal window:"),
+                           "OK", 'o', +1, 1,
+                           NULL);
+                sfree(msgboxtext);
+                sfree(errmsg);
+            } else {
+                need_size = TRUE;
+            }
+        }
 
         /*
          * Resize the window.
@@ -3088,6 +3231,7 @@ void fork_and_exec_self(struct gui_data *inst, int fd_to_close, ...)
     pid = fork();
     if (pid < 0) {
 	perror("fork");
+        sfree(args);
 	return;
     }
 
@@ -3121,6 +3265,7 @@ void fork_and_exec_self(struct gui_data *inst, int fd_to_close, ...)
 
     } else {
 	int status;
+        sfree(args);
 	waitpid(pid, &status, 0);
     }
 
@@ -3162,7 +3307,7 @@ void dup_session_menuitem(GtkMenuItem *item, gpointer gdata)
     }
 
     sprintf(option, "---[%d,%d]", pipefd[0], size);
-    fcntl(pipefd[0], F_SETFD, 0);
+    noncloexec(pipefd[0]);
     fork_and_exec_self(inst, pipefd[1], option, NULL);
     close(pipefd[0]);
 
@@ -3224,6 +3369,8 @@ int read_dupsession_data(struct gui_data *inst, Conf *conf, char *arg)
 	    pty_argv[n++] = dupstr(p);
 	}
     }
+
+    sfree(data);
 
     return 0;
 }
@@ -3444,6 +3591,8 @@ int pt_main(int argc, char **argv)
     extern int cfgbox(Conf *conf);
     struct gui_data *inst;
 
+    setlocale(LC_CTYPE, "");
+
     /*
      * Create an instance structure and initialise to zeroes
      */
@@ -3476,7 +3625,7 @@ int pt_main(int argc, char **argv)
     if (argc > 1 && !strncmp(argv[1], "---", 3)) {
 	read_dupsession_data(inst, inst->conf, argv[1]);
 	/* Splatter this argument so it doesn't clutter a ps listing */
-	memset(argv[1], 0, strlen(argv[1]));
+	smemclr(argv[1], strlen(argv[1]));
     } else {
 	/* By default, we bring up the config dialog, rather than launching
 	 * a session. This gets set to TRUE if something happens to change
@@ -3505,7 +3654,17 @@ int pt_main(int argc, char **argv)
 
     inst->area = gtk_drawing_area_new();
 
-    setup_fonts_ucs(inst);
+#if GTK_CHECK_VERSION(2,0,0)
+    inst->imc = gtk_im_multicontext_new();
+#endif
+
+    {
+        char *errmsg = setup_fonts_ucs(inst);
+        if (errmsg) {
+            fprintf(stderr, "%s: %s\n", appname, errmsg);
+            exit(1);
+        }
+    }
     init_cutbuffers();
 
     inst->window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -3595,6 +3754,10 @@ int pt_main(int argc, char **argv)
 		       GTK_SIGNAL_FUNC(selection_get), inst);
     gtk_signal_connect(GTK_OBJECT(inst->area), "selection_clear_event",
 		       GTK_SIGNAL_FUNC(selection_clear), inst);
+#if GTK_CHECK_VERSION(2,0,0)
+    g_signal_connect(G_OBJECT(inst->imc), "commit",
+                     G_CALLBACK(input_method_commit_event), inst);
+#endif
     if (conf_get_int(inst->conf, CONF_scrollbar))
 	gtk_signal_connect(GTK_OBJECT(inst->sbar_adjust), "value_changed",
 			   GTK_SIGNAL_FUNC(scrollbar_moved), inst);

@@ -443,7 +443,7 @@ static int ssh_sftp_do_select(int include_stdin, int no_fds_ok)
     fd_set rset, wset, xset;
     int i, fdcount, fdsize, *fdlist;
     int fd, fdstate, rwx, ret, maxfd;
-    long now = GETTICKCOUNT();
+    unsigned long now = GETTICKCOUNT();
 
     fdlist = NULL;
     fdcount = fdsize = 0;
@@ -489,13 +489,17 @@ static int ssh_sftp_do_select(int include_stdin, int no_fds_ok)
 	    FD_SET_MAX(0, maxfd, rset);
 
 	do {
-	    long next, ticks;
+	    unsigned long next, then;
+	    long ticks;
 	    struct timeval tv, *ptv;
 
 	    if (run_timers(now, &next)) {
-		ticks = next - GETTICKCOUNT();
-		if (ticks <= 0)
-		    ticks = 1;	       /* just in case */
+		then = now;
+		now = GETTICKCOUNT();
+		if (now - then > next - then)
+		    ticks = 0;
+		else
+		    ticks = next - now;
 		tv.tv_sec = ticks / 1000;
 		tv.tv_usec = ticks % 1000 * 1000;
 		ptv = &tv;
@@ -505,27 +509,8 @@ static int ssh_sftp_do_select(int include_stdin, int no_fds_ok)
 	    ret = select(maxfd, &rset, &wset, &xset, ptv);
 	    if (ret == 0)
 		now = next;
-	    else {
-		long newnow = GETTICKCOUNT();
-		/*
-		 * Check to see whether the system clock has
-		 * changed massively during the select.
-		 */
-		if (newnow - now < 0 || newnow - now > next - now) {
-		    /*
-		     * If so, look at the elapsed time in the
-		     * select and use it to compute a new
-		     * tickcount_offset.
-		     */
-		    long othernow = now + tv.tv_sec * 1000 + tv.tv_usec / 1000;
-		    /* So we'd like GETTICKCOUNT to have returned othernow,
-		     * but instead it return newnow. Hence ... */
-		    tickcount_offset += othernow - newnow;
-		    now = othernow;
-		} else {
-		    now = newnow;
-		}
-	    }
+	    else
+		now = GETTICKCOUNT();
 	} while (ret < 0 && errno != EINTR);
     } while (ret == 0);
 
@@ -580,6 +565,7 @@ char *ssh_sftp_get_cmdline(char *prompt, int no_fds_ok)
 	ret = ssh_sftp_do_select(TRUE, no_fds_ok);
 	if (ret < 0) {
 	    printf("connection died\n");
+            sfree(buf);
 	    return NULL;	       /* woop woop */
 	}
 	if (ret > 0) {
@@ -590,10 +576,12 @@ char *ssh_sftp_get_cmdline(char *prompt, int no_fds_ok)
 	    ret = read(0, buf+buflen, 1);
 	    if (ret < 0) {
 		perror("read");
+                sfree(buf);
 		return NULL;
 	    }
 	    if (ret == 0) {
 		/* eof on stdin; no error, but no answer either */
+                sfree(buf);
 		return NULL;
 	    }
 

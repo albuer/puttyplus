@@ -116,8 +116,9 @@ void sk_cleanup(void);		       /* called just before program exit */
 SockAddr sk_namelookup(const char *host, char **canonicalname, int address_family);
 SockAddr sk_nonamelookup(const char *host);
 void sk_getaddr(SockAddr addr, char *buf, int buflen);
-int sk_hostname_is_local(char *name);
+int sk_hostname_is_local(const char *name);
 int sk_address_is_local(SockAddr addr);
+int sk_address_is_special_local(SockAddr addr);
 int sk_addrtype(SockAddr addr);
 void sk_addrcopy(SockAddr addr, char *buf);
 void sk_addr_free(SockAddr addr);

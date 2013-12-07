@@ -270,7 +270,6 @@ static void fatal_sig_handler(int signum)
 {
     putty_signal(signum, SIG_DFL);
     cleanup_utmp();
-    setuid(getuid());
     raise(signum);
 }
 #endif
@@ -335,12 +334,28 @@ static void pty_open_master(Pty pty)
     chown(pty->name, getuid(), gp ? gp->gr_gid : -1);
     chmod(pty->name, 0600);
 #else
-    pty->master_fd = open("/dev/ptmx", O_RDWR);
+
+    const int flags = O_RDWR
+#ifdef O_NOCTTY
+        | O_NOCTTY
+#endif
+        ;
+
+#ifdef HAVE_POSIX_OPENPT
+    pty->master_fd = posix_openpt(flags);
+
+    if (pty->master_fd < 0) {
+	perror("posix_openpt");
+	exit(1);
+    }
+#else
+    pty->master_fd = open("/dev/ptmx", flags);
 
     if (pty->master_fd < 0) {
 	perror("/dev/ptmx: open");
 	exit(1);
     }
+#endif
 
     if (grantpt(pty->master_fd) < 0) {
 	perror("grantpt");
@@ -358,15 +373,7 @@ static void pty_open_master(Pty pty)
     strncpy(pty->name, ptsname(pty->master_fd), FILENAME_MAX-1);
 #endif
 
-    {
-        /*
-         * Set the pty master into non-blocking mode.
-         */
-        int fl;
-	fl = fcntl(pty->master_fd, F_GETFL);
-	if (fl != -1 && !(fl & O_NONBLOCK))
-	    fcntl(pty->master_fd, F_SETFL, fl | O_NONBLOCK);
-    }
+    nonblock(pty->master_fd);
 
     if (!ptys_by_fd)
 	ptys_by_fd = newtree234(pty_compare_by_fd);
@@ -396,6 +403,7 @@ void pty_pre_init(void)
 #endif
 
     pty = single_pty = snew(struct pty_tag);
+    pty->conf = NULL;
     bufchain_init(&pty->output_data);
 
     /* set the child signal handler straight away; it needs to be set
@@ -515,11 +523,23 @@ void pty_pre_init(void)
 	int gid = getgid(), uid = getuid();
 	int setresgid(gid_t, gid_t, gid_t);
 	int setresuid(uid_t, uid_t, uid_t);
-	setresgid(gid, gid, gid);
-	setresuid(uid, uid, uid);
+	if (setresgid(gid, gid, gid) < 0) {
+            perror("setresgid");
+            exit(1);
+        }
+	if (setresuid(uid, uid, uid) < 0) {
+            perror("setresuid");
+            exit(1);
+        }
 #else
-	setgid(getgid());
-	setuid(getuid());
+	if (setgid(getgid()) < 0) {
+            perror("setgid");
+            exit(1);
+        }
+	if (setuid(getuid()) < 0) {
+            perror("setuid");
+            exit(1);
+        }
 #endif
     }
 }
@@ -606,6 +626,7 @@ int pty_real_select_result(Pty pty, int event, int status)
 	if (close_on_exit == FORCE_OFF ||
 	    (close_on_exit == AUTO && pty->exit_code != 0)) {
 	    char message[512];
+            message[0] = '\0';
 	    if (WIFEXITED(pty->exit_code))
 		sprintf(message, "\r\n[pterm: process terminated with exit"
 			" code %d]\r\n", WEXITSTATUS(pty->exit_code));
@@ -697,6 +718,7 @@ static const char *pty_init(void *frontend, void **backend_handle, Conf *conf,
 
     if (single_pty) {
 	pty = single_pty;
+        assert(pty->conf == NULL);
     } else {
 	pty = snew(struct pty_tag);
 	pty->master_fd = pty->slave_fd = -1;
@@ -732,21 +754,23 @@ static const char *pty_init(void *frontend, void **backend_handle, Conf *conf,
      * Stamp utmp (that is, tell the utmp helper process to do so),
      * or not.
      */
-    if (!conf_get_int(conf, CONF_stamp_utmp)) {
-	close(pty_utmp_helper_pipe);   /* just let the child process die */
-	pty_utmp_helper_pipe = -1;
-    } else if (pty_utmp_helper_pipe >= 0) {
-	char *location = get_x_display(pty->frontend);
-	int len = strlen(location)+1, pos = 0;   /* +1 to include NUL */
-	while (pos < len) {
-	    int ret = write(pty_utmp_helper_pipe, location+pos, len - pos);
-	    if (ret < 0) {
-		perror("pterm: writing to utmp helper process");
-		close(pty_utmp_helper_pipe);   /* arrgh, just give up */
-		pty_utmp_helper_pipe = -1;
-		break;
-	    }
-	    pos += ret;
+    if (pty_utmp_helper_pipe >= 0) {   /* if it's < 0, we can't anyway */
+        if (!conf_get_int(conf, CONF_stamp_utmp)) {
+            close(pty_utmp_helper_pipe);   /* just let the child process die */
+            pty_utmp_helper_pipe = -1;
+        } else {
+            char *location = get_x_display(pty->frontend);
+            int len = strlen(location)+1, pos = 0;   /* +1 to include NUL */
+            while (pos < len) {
+                int ret = write(pty_utmp_helper_pipe, location+pos, len - pos);
+                if (ret < 0) {
+                    perror("pterm: writing to utmp helper process");
+                    close(pty_utmp_helper_pipe);   /* arrgh, just give up */
+                    pty_utmp_helper_pipe = -1;
+                    break;
+                }
+                pos += ret;
+            }
 	}
     }
 #endif
@@ -776,7 +800,7 @@ static const char *pty_init(void *frontend, void **backend_handle, Conf *conf,
 	}
 
 	close(pty->master_fd);
-	fcntl(slavefd, F_SETFD, 0);    /* don't close on exec */
+	noncloexec(slavefd);
 	dup2(slavefd, 0);
 	dup2(slavefd, 1);
 	dup2(slavefd, 2);
@@ -788,7 +812,11 @@ static const char *pty_init(void *frontend, void **backend_handle, Conf *conf,
 	pgrp = getpid();
 	tcsetpgrp(0, pgrp);
 	setpgid(pgrp, pgrp);
-	close(open(pty->name, O_WRONLY, 0));
+        {
+            int ptyfd = open(pty->name, O_WRONLY, 0);
+            if (ptyfd >= 0)
+                close(ptyfd);
+        }
 	setpgid(pgrp, pgrp);
 	{
 	    char *term_env_var = dupprintf("TERM=%s",
@@ -835,9 +863,41 @@ static const char *pty_init(void *frontend, void **backend_handle, Conf *conf,
 	putty_signal(SIGQUIT, SIG_DFL);
 	putty_signal(SIGPIPE, SIG_DFL);
 	block_signal(SIGCHLD, 0);
-	if (pty_argv)
+	if (pty_argv) {
+            /*
+             * Exec the exact argument list we were given.
+             */
 	    execvp(pty_argv[0], pty_argv);
-	else {
+            /*
+             * If that fails, and if we had exactly one argument, pass
+             * that argument to $SHELL -c.
+             *
+             * This arranges that we can _either_ follow 'pterm -e'
+             * with a list of argv elements to be fed directly to
+             * exec, _or_ with a single argument containing a command
+             * to be parsed by a shell (but, in cases of doubt, the
+             * former is more reliable).
+             *
+             * A quick survey of other terminal emulators' -e options
+             * (as of Debian squeeze) suggests that:
+             *
+             *  - xterm supports both modes, more or less like this
+             *  - gnome-terminal will only accept a one-string shell command
+             *  - Eterm, kterm and rxvt will only accept a list of
+             *    argv elements (as did older versions of pterm).
+             *
+             * It therefore seems important to support both usage
+             * modes in order to be a drop-in replacement for either
+             * xterm or gnome-terminal, and hence for anyone's
+             * plausible uses of the Debian-style alias
+             * 'x-terminal-emulator'...
+             */
+            if (pty_argv[1] == NULL) {
+                char *shell = getenv("SHELL");
+                if (shell)
+                    execl(shell, shell, "-c", pty_argv[0], (void *)NULL);
+            }
+        } else {
 	    char *shell = getenv("SHELL");
 	    char *shellname;
 	    if (conf_get_int(conf, CONF_login_shell)) {
@@ -905,7 +965,17 @@ static void pty_free(void *handle)
     del234(ptys_by_pid, pty);
     del234(ptys_by_fd, pty);
 
-    sfree(pty);
+    conf_free(pty->conf);
+    pty->conf = NULL;
+
+    if (pty == single_pty) {
+        /*
+         * Leave this structure around in case we need to Restart
+         * Session.
+         */
+    } else {
+        sfree(pty);
+    }
 }
 
 static void pty_try_write(Pty pty)

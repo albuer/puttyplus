@@ -20,7 +20,7 @@
 
 #define WM_DONEKEY (WM_APP + 1)
 
-#define DEFAULT_KEYSIZE 1024
+#define DEFAULT_KEYSIZE 2048
 
 static char *cmdline_keyfile = NULL;
 
@@ -39,6 +39,22 @@ void modalfatalbox(char *fmt, ...)
 	       MB_SYSTEMMODAL | MB_ICONERROR | MB_OK);
     sfree(stuff);
     exit(1);
+}
+
+/*
+ * Print a non-fatal message box and do not exit.
+ */
+void nonfatal(char *fmt, ...)
+{
+    va_list ap;
+    char *stuff;
+
+    va_start(ap, fmt);
+    stuff = dupvprintf(fmt, ap);
+    va_end(ap);
+    MessageBox(NULL, stuff, "PuTTYgen Error",
+	       MB_SYSTEMMODAL | MB_ICONERROR | MB_OK);
+    sfree(stuff);
 }
 
 /* ----------------------------------------------------------------------
@@ -404,11 +420,11 @@ static int save_ssh1_pubkey(char *filename, struct RSAKey *key)
     char *dec1, *dec2;
     FILE *fp;
 
-    dec1 = bignum_decimal(key->exponent);
-    dec2 = bignum_decimal(key->modulus);
     fp = fopen(filename, "wb");
     if (!fp)
 	return 0;
+    dec1 = bignum_decimal(key->exponent);
+    dec2 = bignum_decimal(key->modulus);
     fprintf(fp, "%d %s %s %s\n",
 	    bignum_bitcount(key->modulus), dec1, dec2, key->comment);
     fclose(fp);
@@ -938,8 +954,11 @@ static int CALLBACK MainDlgProc(HWND hwnd, UINT msg,
 	/*
 	 * Load a key file if one was provided on the command line.
 	 */
-	if (cmdline_keyfile)
-	    load_key_file(hwnd, state, filename_from_str(cmdline_keyfile), 0);
+	if (cmdline_keyfile) {
+            Filename *fn = filename_from_str(cmdline_keyfile);
+	    load_key_file(hwnd, state, fn, 0);
+            filename_free(fn);
+        }
 
 	return 1;
       case WM_MOUSEMOVE:
@@ -958,7 +977,7 @@ static int CALLBACK MainDlgProc(HWND hwnd, UINT msg,
 		 * Seed the entropy pool
 		 */
 		random_add_heavynoise(state->entropy, state->entropy_size);
-		memset(state->entropy, 0, state->entropy_size);
+		smemclr(state->entropy, state->entropy_size);
 		sfree(state->entropy);
 		state->collecting_entropy = FALSE;
 
@@ -1240,9 +1259,11 @@ static int CALLBACK MainDlgProc(HWND hwnd, UINT msg,
 	    if (!state->generation_thread_exists) {
 		char filename[FILENAME_MAX];
 		if (prompt_keyfile(hwnd, "Load private key:",
-				   filename, 0, LOWORD(wParam)==IDC_LOAD))
-		    load_key_file(hwnd, state, filename_from_str(filename),
-				  LOWORD(wParam) != IDC_LOAD);
+				   filename, 0, LOWORD(wParam)==IDC_LOAD)) {
+                    Filename *fn = filename_from_str(filename);
+		    load_key_file(hwnd, state, fn, LOWORD(wParam) != IDC_LOAD);
+                    filename_free(fn);
+                }
 	    }
 	    break;
 	}

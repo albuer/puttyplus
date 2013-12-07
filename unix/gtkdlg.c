@@ -910,9 +910,13 @@ void dlg_filesel_set(union control *ctrl, void *dlg, Filename *fn)
 {
     struct dlgparam *dp = (struct dlgparam *)dlg;
     struct uctrl *uc = dlg_find_byctrl(dp, ctrl);
+    /* We must copy fn->path before passing it to gtk_entry_set_text.
+     * See comment in dlg_editbox_set() for the reasons. */
+    char *duppath = dupstr(fn->path);
     assert(uc->ctrl->generic.type == CTRL_FILESELECT);
     assert(uc->entry != NULL);
-    gtk_entry_set_text(GTK_ENTRY(uc->entry), fn->path);
+    gtk_entry_set_text(GTK_ENTRY(uc->entry), duppath);
+    sfree(duppath);
 }
 
 Filename *dlg_filesel_get(union control *ctrl, void *dlg)
@@ -928,9 +932,13 @@ void dlg_fontsel_set(union control *ctrl, void *dlg, FontSpec *fs)
 {
     struct dlgparam *dp = (struct dlgparam *)dlg;
     struct uctrl *uc = dlg_find_byctrl(dp, ctrl);
+    /* We must copy fs->name before passing it to gtk_entry_set_text.
+     * See comment in dlg_editbox_set() for the reasons. */
+    char *dupname = dupstr(fs->name);
     assert(uc->ctrl->generic.type == CTRL_FONTSELECT);
     assert(uc->entry != NULL);
-    gtk_entry_set_text(GTK_ENTRY(uc->entry), fs->name);
+    gtk_entry_set_text(GTK_ENTRY(uc->entry), dupname);
+    sfree(dupname);
 }
 
 FontSpec *dlg_fontsel_get(union control *ctrl, void *dlg)
@@ -3254,7 +3262,7 @@ int messagebox(GtkWidget *parentwin, char *title, char *msg, int minwid, ...)
     return dp.retval;
 }
 
-static int string_width(char *text)
+int string_width(char *text)
 {
     GtkWidget *label = gtk_label_new(text);
     GtkRequisition req;
@@ -3381,6 +3389,13 @@ void fatal_message_box(void *window, char *msg)
                "OK", 'o', 1, 1, NULL);
 }
 
+void nonfatal_message_box(void *window, char *msg)
+{
+    messagebox(window, "PuTTY Error", msg,
+               string_width("REASONABLY LONG LINE OF TEXT FOR BASIC SANITY"),
+               "OK", 'o', 1, 1, NULL);
+}
+
 void fatalbox(char *p, ...)
 {
     va_list ap;
@@ -3391,6 +3406,17 @@ void fatalbox(char *p, ...)
     fatal_message_box(NULL, msg);
     sfree(msg);
     cleanup_exit(1);
+}
+
+void nonfatal(char *p, ...)
+{
+    va_list ap;
+    char *msg;
+    va_start(ap, p);
+    msg = dupvprintf(p, ap);
+    va_end(ap);
+    fatal_message_box(NULL, msg);
+    sfree(msg);
 }
 
 static GtkWidget *aboutbox = NULL;
@@ -3406,7 +3432,7 @@ static void licence_clicked(GtkButton *button, gpointer data)
     char *title;
 
     char *licence =
-	"Copyright 1997-2011 Simon Tatham.\n\n"
+	"Copyright 1997-2013 Simon Tatham.\n\n"
 
 	"Portions copyright Robert de Bath, Joris van Rantwijk, Delian "
 	"Delchev, Andreas Schultz, Jeroen Massar, Wez Furlong, Nicolas "
@@ -3487,7 +3513,7 @@ void about_box(void *window)
 		       w, FALSE, FALSE, 5);
     gtk_widget_show(w);
 
-    w = gtk_label_new("Copyright 1997-2011 Simon Tatham. All rights reserved");
+    w = gtk_label_new("Copyright 1997-2013 Simon Tatham. All rights reserved");
     gtk_box_pack_start(GTK_BOX(GTK_DIALOG(aboutbox)->vbox),
 		       w, FALSE, FALSE, 5);
     gtk_widget_show(w);

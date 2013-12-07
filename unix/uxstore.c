@@ -166,25 +166,31 @@ void *open_settings_w(const char *sessionname, char **errmsg)
 
     /*
      * Start by making sure the .putty directory and its sessions
-     * subdir actually exist. Ignore error returns from mkdir since
-     * they're perfectly likely to be `already exists', and any
-     * other error will trip us up later on so there's no real need
-     * to catch it now.
+     * subdir actually exist.
      */
+    filename = make_filename(INDEX_DIR, NULL);
+    if (mkdir(filename, 0700) < 0 && errno != EEXIST) {
+        *errmsg = dupprintf("Unable to save session: mkdir(\"%s\") "
+                            "returned '%s'", filename, strerror(errno));
+        sfree(filename);
+        return NULL;
+    }
+    sfree(filename);
+
     filename = make_filename(INDEX_SESSIONDIR, NULL);
-    if (mkdir(filename, 0700) != 0) {
-	char *filename2 = make_filename(INDEX_DIR, NULL);
-	mkdir(filename2, 0700);
-	sfree(filename2);
-	mkdir(filename, 0700);
+    if (mkdir(filename, 0700) < 0 && errno != EEXIST) {
+        *errmsg = dupprintf("Unable to save session: mkdir(\"%s\") "
+                            "returned '%s'", filename, strerror(errno));
+        sfree(filename);
+        return NULL;
     }
     sfree(filename);
 
     filename = make_filename(INDEX_SESSION, sessionname);
     fp = fopen(filename, "w");
     if (!fp) {
-        *errmsg = dupprintf("Unable to create %s: %s",
-                            filename, strerror(errno));
+        *errmsg = dupprintf("Unable to save session: open(\"%s\") "
+                            "returned '%s'", filename, strerror(errno));
 	sfree(filename);
 	return NULL;                   /* can't open */
     }
@@ -299,8 +305,10 @@ void *open_settings_r(const char *sessionname)
         char *value = strchr(line, '=');
         struct skeyval *kv;
 
-        if (!value)
+        if (!value) {
+            sfree(line);
             continue;
+        }
         *value++ = '\0';
         value[strcspn(value, "\r\n")] = '\0';   /* trim trailing NL */
 
@@ -589,29 +597,39 @@ void store_host_key(const char *hostname, int port,
     int headerlen;
     char *filename, *tmpfilename;
 
-    newtext = dupprintf("%s@%d:%s %s\n", keytype, port, hostname, key);
-    headerlen = 1 + strcspn(newtext, " ");   /* count the space too */
-
     /*
      * Open both the old file and a new file.
      */
     tmpfilename = make_filename(INDEX_HOSTKEYS_TMP, NULL);
     wfp = fopen(tmpfilename, "w");
-    if (!wfp) {
+    if (!wfp && errno == ENOENT) {
         char *dir;
 
         dir = make_filename(INDEX_DIR, NULL);
-        mkdir(dir, 0700);
+        if (mkdir(dir, 0700) < 0) {
+            char *msg = dupprintf("Unable to store host key: mkdir(\"%s\") "
+                                  "returned '%s'", dir, strerror(errno));
+            nonfatal(msg);
+            sfree(dir);
+            sfree(tmpfilename);
+            return;
+        }
 	sfree(dir);
 
         wfp = fopen(tmpfilename, "w");
     }
     if (!wfp) {
-	sfree(tmpfilename);
-	return;
+        char *msg = dupprintf("Unable to store host key: open(\"%s\") "
+                              "returned '%s'", tmpfilename, strerror(errno));
+        nonfatal(msg);
+        sfree(tmpfilename);
+        return;
     }
     filename = make_filename(INDEX_HOSTKEYS, NULL);
     rfp = fopen(filename, "r");
+
+    newtext = dupprintf("%s@%d:%s %s\n", keytype, port, hostname, key);
+    headerlen = 1 + strcspn(newtext, " ");   /* count the space too */
 
     /*
      * Copy all lines from the old file to the new one that _don't_
@@ -621,6 +639,7 @@ void store_host_key(const char *hostname, int port,
         while ( (line = fgetline(rfp)) ) {
             if (strncmp(line, newtext, headerlen))
                 fputs(line, wfp);
+            sfree(line);
         }
         fclose(rfp);
     }
@@ -632,7 +651,12 @@ void store_host_key(const char *hostname, int port,
 
     fclose(wfp);
 
-    rename(tmpfilename, filename);
+    if (rename(tmpfilename, filename) < 0) {
+        char *msg = dupprintf("Unable to store host key: rename(\"%s\",\"%s\")"
+                              " returned '%s'", tmpfilename, filename,
+                              strerror(errno));
+        nonfatal(msg);
+    }
 
     sfree(tmpfilename);
     sfree(filename);
@@ -669,18 +693,48 @@ void write_random_seed(void *data, int len)
      */
     fd = open(fname, O_CREAT | O_WRONLY, 0600);
     if (fd < 0) {
+        if (errno != ENOENT) {
+            char *msg = dupprintf("Unable to write random seed: open(\"%s\") "
+                                  "returned '%s'", fname, strerror(errno));
+            nonfatal(msg);
+            sfree(msg);
+            sfree(fname);
+            return;
+        }
 	char *dir;
 
 	dir = make_filename(INDEX_DIR, NULL);
-	mkdir(dir, 0700);
+	if (mkdir(dir, 0700) < 0) {
+            char *msg = dupprintf("Unable to write random seed: mkdir(\"%s\") "
+                                  "returned '%s'", dir, strerror(errno));
+            nonfatal(msg);
+            sfree(msg);
+            sfree(fname);
+            sfree(dir);
+            return;
+        }
 	sfree(dir);
 
 	fd = open(fname, O_CREAT | O_WRONLY, 0600);
+        if (fd < 0) {
+            char *msg = dupprintf("Unable to write random seed: open(\"%s\") "
+                                  "returned '%s'", fname, strerror(errno));
+            nonfatal(msg);
+            sfree(msg);
+            sfree(fname);
+            return;
+        }
     }
 
     while (len > 0) {
 	int ret = write(fd, data, len);
-	if (ret <= 0) break;
+	if (ret < 0) {
+            char *msg = dupprintf("Unable to write random seed: write "
+                                  "returned '%s'", strerror(errno));
+            nonfatal(msg);
+            sfree(msg);
+            break;
+        }
 	len -= ret;
 	data = (char *)data + len;
     }

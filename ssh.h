@@ -133,9 +133,9 @@ typedef struct {
     uint32 lenhi, lenlo;
 } SHA_State;
 void SHA_Init(SHA_State * s);
-void SHA_Bytes(SHA_State * s, void *p, int len);
+void SHA_Bytes(SHA_State * s, const void *p, int len);
 void SHA_Final(SHA_State * s, unsigned char *output);
-void SHA_Simple(void *p, int len, unsigned char *output);
+void SHA_Simple(const void *p, int len, unsigned char *output);
 
 void hmac_sha1_simple(void *key, int keylen, void *data, int datalen,
 		      unsigned char *output);
@@ -297,6 +297,7 @@ extern const struct ssh_mac ssh_hmac_sha1;
 extern const struct ssh_mac ssh_hmac_sha1_buggy;
 extern const struct ssh_mac ssh_hmac_sha1_96;
 extern const struct ssh_mac ssh_hmac_sha1_96_buggy;
+extern const struct ssh_mac ssh_hmac_sha256;
 
 void *aes_make_context(void);
 void aes_free_context(void *handle);
@@ -550,7 +551,8 @@ int rsa_generate(struct RSAKey *key, int bits, progfn_t pfn,
 int dsa_generate(struct dss_key *key, int bits, progfn_t pfn,
 		 void *pfnparam);
 Bignum primegen(int bits, int modulus, int residue, Bignum factor,
-		int phase, progfn_t pfn, void *pfnparam);
+		int phase, progfn_t pfn, void *pfnparam, unsigned firstbits);
+void invent_firstbits(unsigned *one, unsigned *two);
 
 
 /*

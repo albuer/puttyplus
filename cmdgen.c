@@ -102,6 +102,16 @@ void modalfatalbox(char *p, ...)
     cleanup_exit(1);
 }
 
+void nonfatal(char *p, ...)
+{
+    va_list ap;
+    fprintf(stderr, "ERROR: ");
+    va_start(ap, p);
+    vfprintf(stderr, p, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+}
+
 /*
  * Stubs to let everything else link sensibly.
  */
@@ -118,10 +128,7 @@ void sk_cleanup(void)
 
 void showversion(void)
 {
-    char *verstr = dupstr(ver);
-    verstr[0] = tolower((unsigned char)verstr[0]);
-    printf("PuTTYgen %s\n", verstr);
-    sfree(verstr);
+    printf("puttygen: %s\n", ver);
 }
 
 void usage(int standalone)
@@ -257,11 +264,11 @@ static char *blobfp(char *alg, int bits, unsigned char *blob, int bloblen)
 int main(int argc, char **argv)
 {
     char *infile = NULL;
-    Filename *infilename, *outfilename;
+    Filename *infilename = NULL, *outfilename = NULL;
     enum { NOKEYGEN, RSA1, RSA2, DSA } keytype = NOKEYGEN;    
     char *outfile = NULL, *outfiletmp = NULL;
     enum { PRIVATE, PUBLIC, PUBLICO, FP, OPENSSH, SSHCOM } outtype = PRIVATE;
-    int bits = 1024;
+    int bits = 2048;
     char *comment = NULL, *origcomment = NULL;
     int change_passphrase = FALSE;
     int errs = FALSE, nogo = FALSE;
@@ -667,7 +674,7 @@ int main(int argc, char **argv)
 	    return 1;
 	}
 	random_add_heavynoise(entropy, bits / 8);
-	memset(entropy, 0, bits/8);
+	smemclr(entropy, bits/8);
 	sfree(entropy);
 
 	if (keytype == DSA) {
@@ -766,6 +773,9 @@ int main(int argc, char **argv)
 		}
 		ssh1key->comment = dupstr(origcomment);
 		ssh1key->private_exponent = NULL;
+		ssh1key->p = NULL;
+		ssh1key->q = NULL;
+		ssh1key->iqmp = NULL;
 	    } else {
 		ret = loadrsakey(infilename, ssh1key, passphrase, &error);
 	    }
@@ -779,11 +789,13 @@ int main(int argc, char **argv)
 	    if (!load_encrypted) {
 		ssh2blob = ssh2_userkey_loadpub(infilename, &ssh2alg,
 						&ssh2bloblen, NULL, &error);
-		ssh2algf = find_pubkey_alg(ssh2alg);
-		if (ssh2algf)
-		    bits = ssh2algf->pubkey_bits(ssh2blob, ssh2bloblen);
-		else
-		    bits = -1;
+                if (ssh2blob) {
+                    ssh2algf = find_pubkey_alg(ssh2alg);
+                    if (ssh2algf)
+                        bits = ssh2algf->pubkey_bits(ssh2blob, ssh2bloblen);
+                    else
+                        bits = -1;
+                }
 	    } else {
 		ssh2key = ssh2_load_userkey(infilename, passphrase, &error);
 	    }
@@ -860,7 +872,7 @@ int main(int argc, char **argv)
 		return 1;
 	    }
 	    if (passphrase) {
-		memset(passphrase, 0, strlen(passphrase));
+		smemclr(passphrase, strlen(passphrase));
 		sfree(passphrase);
 	    }
 	    passphrase = dupstr(p->prompts[0]->result);
@@ -1035,7 +1047,7 @@ int main(int argc, char **argv)
     }
 
     if (passphrase) {
-	memset(passphrase, 0, strlen(passphrase));
+	smemclr(passphrase, strlen(passphrase));
 	sfree(passphrase);
     }
 

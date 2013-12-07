@@ -171,6 +171,7 @@ struct X11Display *x11_setup_display(char *display, int authtype, Conf *conf)
 	    sk_addr_free(disp->addr);
 	    sfree(disp->hostname);
 	    sfree(disp->unixsocketpath);
+	    sfree(disp);
 	    return NULL;	       /* FIXME: report an error */
 	}
     }
@@ -264,10 +265,10 @@ void x11_free_display(struct X11Display *disp)
     sfree(disp->hostname);
     sfree(disp->unixsocketpath);
     if (disp->localauthdata)
-	memset(disp->localauthdata, 0, disp->localauthdatalen);
+	smemclr(disp->localauthdata, disp->localauthdatalen);
     sfree(disp->localauthdata);
     if (disp->remoteauthdata)
-	memset(disp->remoteauthdata, 0, disp->remoteauthdatalen);
+	smemclr(disp->remoteauthdata, disp->remoteauthdatalen);
     sfree(disp->remoteauthdata);
     sfree(disp->remoteauthprotoname);
     sfree(disp->remoteauthdatastring);
@@ -343,7 +344,7 @@ void x11_get_auth_from_authfile(struct X11Display *disp,
     int len[4];
     int family, protocol;
     int ideal_match = FALSE;
-    char *ourhostname = get_hostname();
+    char *ourhostname;
 
     /*
      * Normally we should look for precisely the details specified in
@@ -371,6 +372,8 @@ void x11_get_auth_from_authfile(struct X11Display *disp,
     authfp = fopen(authfilename, "rb");
     if (!authfp)
 	return;
+
+    ourhostname = get_hostname();
 
     /* Records in .Xauthority contain four strings of up to 64K each */
     buf = snewn(65537 * 4, char);
@@ -487,7 +490,7 @@ void x11_get_auth_from_authfile(struct X11Display *disp,
 
     done:
     fclose(authfp);
-    memset(buf, 0, 65537 * 4);
+    smemclr(buf, 65537 * 4);
     sfree(buf);
     sfree(ourhostname);
 }
@@ -503,16 +506,20 @@ static int x11_closing(Plug plug, const char *error_msg, int error_code,
 {
     struct X11Private *pr = (struct X11Private *) plug;
 
-    /*
-     * We have no way to communicate down the forwarded connection,
-     * so if an error occurred on the socket, we just ignore it
-     * and treat it like a proper close.
-     *
-     * FIXME: except we could initiate a full close here instead of
-     * just an outgoing EOF? ssh.c currently has no API for that, but
-     * it could.
-     */
-    sshfwd_write_eof(pr->c);
+    if (error_msg) {
+        /*
+         * Socket error. Slam the connection instantly shut.
+         */
+        sshfwd_unclean_close(pr->c);
+    } else {
+        /*
+         * Ordinary EOF received on socket. Send an EOF on the SSH
+         * channel.
+         */
+        if (pr->c)
+            sshfwd_write_eof(pr->c);
+    }
+
     return 1;
 }
 

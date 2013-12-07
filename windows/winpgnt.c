@@ -174,7 +174,7 @@ static void forget_passphrases(void)
 {
     while (count234(passphrases) > 0) {
 	char *pp = index234(passphrases, 0);
-	memset(pp, 0, strlen(pp));
+	smemclr(pp, strlen(pp));
 	delpos234(passphrases, 0);
 	free(pp);
     }
@@ -353,28 +353,27 @@ static void keylist_update(void)
 			       0, (LPARAM) listentry);
 	}
 	for (i = 0; NULL != (skey = index234(ssh2keys, i)); i++) {
-	    char listentry[512], *p;
-	    int len;
+	    char *listentry, *p;
+	    int fp_len;
 	    /*
 	     * Replace two spaces in the fingerprint with tabs, for
 	     * nice alignment in the box.
 	     */
 	    p = skey->alg->fingerprint(skey->data);
-	    strncpy(listentry, p, sizeof(listentry));
+            listentry = dupprintf("%s\t%s", p, skey->comment);
+            fp_len = strlen(listentry);
+            sfree(p);
+
 	    p = strchr(listentry, ' ');
-	    if (p)
+	    if (p && p < listentry + fp_len)
 		*p = '\t';
 	    p = strchr(listentry, ' ');
-	    if (p)
+	    if (p && p < listentry + fp_len)
 		*p = '\t';
-	    len = strlen(listentry);
-	    if (len < sizeof(listentry) - 2) {
-		listentry[len] = '\t';
-		strncpy(listentry + len + 1, skey->comment,
-			sizeof(listentry) - len - 1);
-	    }
+
 	    SendDlgItemMessage(keylist, 100, LB_ADDSTRING, 0,
 			       (LPARAM) listentry);
+            sfree(listentry);
 	}
 	SendDlgItemMessage(keylist, 100, LB_SETCURSEL, (WPARAM) - 1, 0);
     }
@@ -450,7 +449,12 @@ static void add_keyfile(Filename *filename)
 			   MB_OK | MB_ICONERROR);
 		return;
 	    }
-	    nkeys = GET_32BIT(keylist);
+	    nkeys = toint(GET_32BIT(keylist));
+	    if (nkeys < 0) {
+		MessageBox(NULL, "Received broken key list?!", APPNAME,
+			   MB_OK | MB_ICONERROR);
+		return;
+	    }
 	    p = keylist + 4;
 	    keylistlen -= 4;
 
@@ -478,8 +482,8 @@ static void add_keyfile(Filename *filename)
 				   MB_OK | MB_ICONERROR);
 			return;
 		    }
-		    n = 4 + GET_32BIT(p);
-		    if (keylistlen < n) {
+		    n = toint(4 + GET_32BIT(p));
+		    if (n < 0 || keylistlen < n) {
 			MessageBox(NULL, "Received broken key list?!", APPNAME,
 				   MB_OK | MB_ICONERROR);
 			return;
@@ -495,8 +499,8 @@ static void add_keyfile(Filename *filename)
 				   MB_OK | MB_ICONERROR);
 			return;
 		    }
-		    n = 4 + GET_32BIT(p);
-		    if (keylistlen < n) {
+		    n = toint(4 + GET_32BIT(p));
+		    if (n < 0 || keylistlen < n) {
 			MessageBox(NULL, "Received broken key list?!", APPNAME,
 				   MB_OK | MB_ICONERROR);
 			return;
@@ -807,8 +811,10 @@ static void *get_keylist1(int *length)
 	retval = agent_query(request, 5, &vresponse, &resplen, NULL, NULL);
 	assert(retval == 1);
 	response = vresponse;
-	if (resplen < 5 || response[4] != SSH1_AGENT_RSA_IDENTITIES_ANSWER)
+	if (resplen < 5 || response[4] != SSH1_AGENT_RSA_IDENTITIES_ANSWER) {
+            sfree(response);
 	    return NULL;
+        }
 
 	ret = snewn(resplen-5, unsigned char);
 	memcpy(ret, response+5, resplen-5);
@@ -842,8 +848,10 @@ static void *get_keylist2(int *length)
 	retval = agent_query(request, 5, &vresponse, &resplen, NULL, NULL);
 	assert(retval == 1);
 	response = vresponse;
-	if (resplen < 5 || response[4] != SSH2_AGENT_IDENTITIES_ANSWER)
+	if (resplen < 5 || response[4] != SSH2_AGENT_IDENTITIES_ANSWER) {
+            sfree(response);
 	    return NULL;
+        }
 
 	ret = snewn(resplen-5, unsigned char);
 	memcpy(ret, response+5, resplen-5);
@@ -938,12 +946,17 @@ static void answer_msg(void *msg)
 		goto failure;
 	    p += i;
 	    i = ssh1_read_bignum(p, msgend - p, &reqkey.modulus);
-	    if (i < 0)
+	    if (i < 0) {
+                freebn(reqkey.exponent);
 		goto failure;
+            }
 	    p += i;
 	    i = ssh1_read_bignum(p, msgend - p, &challenge);
-	    if (i < 0)
+	    if (i < 0) {
+                freebn(reqkey.exponent);
+                freebn(reqkey.modulus);
 		goto failure;
+            }
 	    p += i;
 	    if (msgend < p+16) {
 		freebn(reqkey.exponent);
@@ -968,7 +981,7 @@ static void answer_msg(void *msg)
 	    MD5Init(&md5c);
 	    MD5Update(&md5c, response_source, 48);
 	    MD5Final(response_md5, &md5c);
-	    memset(response_source, 0, 48);	/* burn the evidence */
+	    smemclr(response_source, 48);	/* burn the evidence */
 	    freebn(response);	       /* and that evidence */
 	    freebn(challenge);	       /* yes, and that evidence */
 	    freebn(reqkey.exponent);   /* and free some memory ... */
@@ -998,17 +1011,17 @@ static void answer_msg(void *msg)
 
 	    if (msgend < p+4)
 		goto failure;
-	    b.len = GET_32BIT(p);
+	    b.len = toint(GET_32BIT(p));
+            if (b.len < 0 || b.len > msgend - (p+4))
+                goto failure;
 	    p += 4;
-	    if (msgend < p+b.len)
-		goto failure;
 	    b.blob = p;
 	    p += b.len;
 	    if (msgend < p+4)
 		goto failure;
-	    datalen = GET_32BIT(p);
+	    datalen = toint(GET_32BIT(p));
 	    p += 4;
-	    if (msgend < p+datalen)
+	    if (datalen < 0 || datalen > msgend - p)
 		goto failure;
 	    data = p;
 	    key = find234(ssh2keys, &b, cmpkeys_ssh2_asymm);
@@ -1081,9 +1094,9 @@ static void answer_msg(void *msg)
 		sfree(key);
 		goto failure;
 	    }
-            commentlen = GET_32BIT(p);
+            commentlen = toint(GET_32BIT(p));
 
-	    if (msgend < p+commentlen) {
+	    if (commentlen < 0 || commentlen > msgend - p) {
 		freersakey(key);
 		sfree(key);
 		goto failure;
@@ -1120,9 +1133,9 @@ static void answer_msg(void *msg)
 
 	    if (msgend < p+4)
 		goto failure;
-	    alglen = GET_32BIT(p);
+	    alglen = toint(GET_32BIT(p));
 	    p += 4;
-	    if (msgend < p+alglen)
+	    if (alglen < 0 || alglen > msgend - p)
 		goto failure;
 	    alg = p;
 	    p += alglen;
@@ -1156,10 +1169,10 @@ static void answer_msg(void *msg)
 		sfree(key);
 		goto failure;
 	    }
-	    commlen = GET_32BIT(p);
+	    commlen = toint(GET_32BIT(p));
 	    p += 4;
 
-	    if (msgend < p+commlen) {
+	    if (commlen < 0 || commlen > msgend - p) {
 		key->alg->freekey(key->data);
 		sfree(key);
 		goto failure;
@@ -1223,10 +1236,10 @@ static void answer_msg(void *msg)
 
 	    if (msgend < p+4)
 		goto failure;
-	    b.len = GET_32BIT(p);
+	    b.len = toint(GET_32BIT(p));
 	    p += 4;
 
-	    if (msgend < p+b.len)
+	    if (b.len < 0 || b.len > msgend - p)
 		goto failure;
 	    b.blob = p;
 	    p += b.len;
@@ -1433,10 +1446,12 @@ static void prompt_add_keyfile(void)
     of.lpstrTitle = "Select Private Key File";
     of.Flags = OFN_ALLOWMULTISELECT | OFN_EXPLORER;
     if (request_file(keypath, &of, TRUE, FALSE)) {
-	if(strlen(filelist) > of.nFileOffset)
+	if(strlen(filelist) > of.nFileOffset) {
 	    /* Only one filename returned? */
-	    add_keyfile(filename_from_str(filelist));
-	else {
+            Filename *fn = filename_from_str(filelist);
+	    add_keyfile(fn);
+            filename_free(fn);
+        } else {
 	    /* we are returned a bunch of strings, end to
 	     * end. first string is the directory, the
 	     * rest the filenames. terminated with an
@@ -1446,7 +1461,9 @@ static void prompt_add_keyfile(void)
 	    char *filewalker = filelist + strlen(dir) + 1;
 	    while (*filewalker != '\0') {
 		char *filename = dupcat(dir, "\\", filewalker, NULL);
-		add_keyfile(filename_from_str(filename));
+                Filename *fn = filename_from_str(filename);
+		add_keyfile(fn);
+                filename_free(fn);
 		sfree(filename);
 		filewalker += strlen(filewalker) + 1;
 	    }
@@ -1904,6 +1921,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 #ifdef DEBUG_IPC
 			debug(("couldn't get user SID\n"));
 #endif
+                        CloseHandle(filemap);
 			return 0;
                     }
 
@@ -1911,6 +1929,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 #ifdef DEBUG_IPC
 			debug(("couldn't get default SID\n"));
 #endif
+                        CloseHandle(filemap);
+                        sfree(ourself);
 			return 0;
                     }
 
@@ -1922,6 +1942,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 			debug(("couldn't get owner info for filemap: %d\n",
                                rc));
 #endif
+                        CloseHandle(filemap);
+                        sfree(ourself);
+                        sfree(ourself2);
 			return 0;
 		    }
 #ifdef DEBUG_IPC
@@ -1940,6 +1963,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 		    if (!EqualSid(mapowner, ourself) &&
                         !EqualSid(mapowner, ourself2)) {
                         CloseHandle(filemap);
+                        LocalFree(psd);
+                        sfree(ourself);
+                        sfree(ourself2);
 			return 0;      /* security ID mismatch! */
                     }
 #ifdef DEBUG_IPC
@@ -2013,7 +2039,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 {
     WNDCLASS wndclass;
     MSG msg;
-    HMODULE advapi;
     char *command = NULL;
     int added_keys = 0;
     int argc, i;
@@ -2054,8 +2079,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 		   "Pageant Fatal Error", MB_ICONERROR | MB_OK);
 	return 1;
 #endif
-    } else
-	advapi = NULL;
+    }
 
     /*
      * See if we can find our Help file.
@@ -2108,8 +2132,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     for (i = 0; i < argc; i++) {
 	if (!strcmp(argv[i], "-pgpfp")) {
 	    pgp_fingerprints();
-	    if (advapi)
-		FreeLibrary(advapi);
 	    return 1;
 	} else if (!strcmp(argv[i], "-c")) {
 	    /*
@@ -2123,7 +2145,9 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 		command = "";
 	    break;
 	} else {
-	    add_keyfile(filename_from_str(argv[i]));
+            Filename *fn = filename_from_str(argv[i]);
+	    add_keyfile(fn);
+            filename_free(fn);
 	    added_keys = TRUE;
 	}
     }
@@ -2157,8 +2181,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 	    MessageBox(NULL, "Pageant is already running", "Pageant Error",
 		       MB_ICONERROR | MB_OK);
 	}
-	if (advapi)
-	    FreeLibrary(advapi);
 	return 0;
     }
 
@@ -2237,9 +2259,6 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
     }
 
     if (keypath) filereq_free(keypath);
-
-    if (advapi)
-	FreeLibrary(advapi);
 
     cleanup_exit(msg.wParam);
     return msg.wParam;		       /* just in case optimiser complains */

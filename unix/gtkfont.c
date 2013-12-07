@@ -191,8 +191,10 @@ static char *x11_guess_derived_font_name(XFontStruct *xfs, int bold, int wide)
 		p++;
 	    }
 
-	    if (nstr < lenof(strings))
+	    if (nstr < lenof(strings)) {
+                sfree(dupname);
 		return NULL;	       /* XLFD was malformed */
+            }
 
 	    if (bold)
 		strings[2] = "bold";
@@ -430,7 +432,7 @@ static int x11font_has_glyph(unifont *font, wchar_t glyph)
         char sbstring[2];
         int sblen = wc_to_mb(xfont->real_charset, 0, &glyph, 1,
                              sbstring, 2, "", NULL, NULL);
-        if (!sbstring[0])
+        if (sblen == 0 || !sbstring[0])
             return FALSE;              /* not even in the charset */
 
         return x11_font_has_glyph(xfont->fonts[0], 0,
@@ -2288,6 +2290,8 @@ static fontinfo *update_for_intended_size(unifontsel_internal *fs,
      */
     below = findrelpos234(fs->fonts_by_selorder, &info2, NULL,
 			  REL234_LE, &pos);
+    if (!below)
+        pos = -1;
     above = index234(fs->fonts_by_selorder, pos+1);
 
     /*
@@ -2295,7 +2299,7 @@ static fontinfo *update_for_intended_size(unifontsel_internal *fs,
      * case. If we have, it'll be in `below' and not `above',
      * because we did a REL234_LE rather than REL234_LT search.
      */
-    if (!fontinfo_selorder_compare(&info2, below))
+    if (below && !fontinfo_selorder_compare(&info2, below))
 	return below;
 
     /*

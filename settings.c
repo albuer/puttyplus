@@ -562,7 +562,7 @@ void save_open_settings(void *sesskey, Conf *conf)
     write_setting_i(sesskey, "TryPalette", conf_get_int(conf, CONF_try_palette));
     write_setting_i(sesskey, "ANSIColour", conf_get_int(conf, CONF_ansi_colour));
     write_setting_i(sesskey, "Xterm256Colour", conf_get_int(conf, CONF_xterm_256_colour));
-    write_setting_i(sesskey, "BoldAsColour", conf_get_int(conf, CONF_bold_colour));
+    write_setting_i(sesskey, "BoldAsColour", conf_get_int(conf, CONF_bold_style)-1);
 
     for (i = 0; i < 22; i++) {
 	char buf[20], buf2[30];
@@ -620,6 +620,7 @@ void save_open_settings(void *sesskey, Conf *conf)
     write_setting_i(sesskey, "BugPKSessID2", 2-conf_get_int(conf, CONF_sshbug_pksessid2));
     write_setting_i(sesskey, "BugRekey2", 2-conf_get_int(conf, CONF_sshbug_rekey2));
     write_setting_i(sesskey, "BugMaxPkt2", 2-conf_get_int(conf, CONF_sshbug_maxpkt2));
+    write_setting_i(sesskey, "BugWinadj", 2-conf_get_int(conf, CONF_sshbug_winadj));
     write_setting_i(sesskey, "StampUtmp", conf_get_int(conf, CONF_stamp_utmp));
     write_setting_i(sesskey, "LoginShell", conf_get_int(conf, CONF_login_shell));
     write_setting_i(sesskey, "ScrollbarOnLeft", conf_get_int(conf, CONF_scrollbar_on_left));
@@ -848,7 +849,7 @@ void load_open_settings(void *sesskey, Conf *conf)
 		 / 1000
 #endif
 		 );
-    gppi(sesskey, "ScrollbackLines", 200, conf, CONF_savelines);
+    gppi(sesskey, "ScrollbackLines", 2000, conf, CONF_savelines);
     gppi(sesskey, "DECOriginMode", 0, conf, CONF_dec_om);
     gppi(sesskey, "AutoWrapMode", 1, conf, CONF_wrap_mode);
     gppi(sesskey, "LFImpliesCR", 0, conf, CONF_lfhascr);
@@ -866,7 +867,7 @@ void load_open_settings(void *sesskey, Conf *conf)
     gppi(sesskey, "TryPalette", 0, conf, CONF_try_palette);
     gppi(sesskey, "ANSIColour", 1, conf, CONF_ansi_colour);
     gppi(sesskey, "Xterm256Colour", 1, conf, CONF_xterm_256_colour);
-    gppi(sesskey, "BoldAsColour", 1, conf, CONF_bold_colour);
+    i = gppi_raw(sesskey, "BoldAsColour", 0); conf_set_int(conf, CONF_bold_style, i+1);
 
     for (i = 0; i < 22; i++) {
 	static const char *const defaults[] = {
@@ -961,6 +962,7 @@ void load_open_settings(void *sesskey, Conf *conf)
     i = gppi_raw(sesskey, "BugPKSessID2", 0); conf_set_int(conf, CONF_sshbug_pksessid2, 2-i);
     i = gppi_raw(sesskey, "BugRekey2", 0); conf_set_int(conf, CONF_sshbug_rekey2, 2-i);
     i = gppi_raw(sesskey, "BugMaxPkt2", 0); conf_set_int(conf, CONF_sshbug_maxpkt2, 2-i);
+    i = gppi_raw(sesskey, "BugWinadj", 0); conf_set_int(conf, CONF_sshbug_winadj, 2-i);
     conf_set_int(conf, CONF_ssh_simple, FALSE);
     gppi(sesskey, "StampUtmp", 1, conf, CONF_stamp_utmp);
     gppi(sesskey, "LoginShell", 1, conf, CONF_login_shell);

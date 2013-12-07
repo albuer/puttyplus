@@ -537,12 +537,19 @@ static void sshbug_handler(union control *ctrl, void *dlg,
 {
     Conf *conf = (Conf *)data;
     if (event == EVENT_REFRESH) {
+        /*
+         * We must fetch the previously configured value from the Conf
+         * before we start modifying the drop-down list, otherwise the
+         * spurious SELCHANGE we trigger in the process will overwrite
+         * the value we wanted to keep.
+         */
+        int oldconf = conf_get_int(conf, ctrl->listbox.context.i);
 	dlg_update_start(ctrl, dlg);
 	dlg_listbox_clear(ctrl, dlg);
 	dlg_listbox_addwithid(ctrl, dlg, "Auto", AUTO);
 	dlg_listbox_addwithid(ctrl, dlg, "Off", FORCE_OFF);
 	dlg_listbox_addwithid(ctrl, dlg, "On", FORCE_ON);
-	switch (conf_get_int(conf, ctrl->listbox.context.i)) {
+	switch (oldconf) {
 	  case AUTO:      dlg_listbox_select(ctrl, dlg, 0); break;
 	  case FORCE_OFF: dlg_listbox_select(ctrl, dlg, 1); break;
 	  case FORCE_ON:  dlg_listbox_select(ctrl, dlg, 2); break;
@@ -558,14 +565,20 @@ static void sshbug_handler(union control *ctrl, void *dlg,
     }
 }
 
-#define SAVEDSESSION_LEN 2048
-
 struct sessionsaver_data {
     union control *editbox, *listbox, *loadbutton, *savebutton, *delbutton;
     union control *okbutton, *cancelbutton;
     struct sesslist sesslist;
     int midsession;
+    char *savedsession;     /* the current contents of ssd->editbox */
 };
+
+static void sessionsaver_data_free(void *ssdv)
+{
+    struct sessionsaver_data *ssd = (struct sessionsaver_data *)ssdv;
+    sfree(ssd->savedsession);
+    sfree(ssd);
+}
 
 /* 
  * Helper function to load the session selected in the list box, if
@@ -573,7 +586,6 @@ struct sessionsaver_data {
  * failure.
  */
 static int load_selected_session(struct sessionsaver_data *ssd,
-				 char *savedsession,
 				 void *dlg, Conf *conf, int *maybe_launch)
 {
     int i = dlg_listbox_index(ssd->listbox, dlg);
@@ -584,17 +596,10 @@ static int load_selected_session(struct sessionsaver_data *ssd,
     }
     isdef = !strcmp(ssd->sesslist.sessions[i], "Default Settings");
     load_settings(ssd->sesslist.sessions[i], conf);
-    if (!isdef) {
-	strncpy(savedsession, ssd->sesslist.sessions[i],
-		SAVEDSESSION_LEN);
-	savedsession[SAVEDSESSION_LEN-1] = '\0';
-	if (maybe_launch)
-	    *maybe_launch = TRUE;
-    } else {
-	savedsession[0] = '\0';
-	if (maybe_launch)
-	    *maybe_launch = FALSE;
-    }
+    sfree(ssd->savedsession);
+    ssd->savedsession = dupstr(isdef ? "" : ssd->sesslist.sessions[i]);
+    if (maybe_launch)
+        *maybe_launch = !isdef;
     dlg_refresh(NULL, dlg);
     /* Restore the selection, which might have been clobbered by
      * changing the value of the edit box. */
@@ -608,33 +613,10 @@ static void sessionsaver_handler(union control *ctrl, void *dlg,
     Conf *conf = (Conf *)data;
     struct sessionsaver_data *ssd =
 	(struct sessionsaver_data *)ctrl->generic.context.p;
-    char *savedsession;
-
-    /*
-     * The first time we're called in a new dialog, we must
-     * allocate space to store the current contents of the saved
-     * session edit box (since it must persist even when we switch
-     * panels, but is not part of the Conf).
-     *
-     * FIXME: this is disgusting, and we'd do much better to have
-     * the persistent storage be dynamically allocated and get rid
-     * of the arbitrary limit SAVEDSESSION_LEN. To do that would
-     * require a means of making sure the memory gets freed at the
-     * appropriate moment.
-     */
-    if (!ssd->editbox) {
-        savedsession = NULL;
-    } else if (!dlg_get_privdata(ssd->editbox, dlg)) {
-	savedsession = (char *)
-	    dlg_alloc_privdata(ssd->editbox, dlg, SAVEDSESSION_LEN);
-	savedsession[0] = '\0';
-    } else {
-	savedsession = dlg_get_privdata(ssd->editbox, dlg);
-    }
 
     if (event == EVENT_REFRESH) {
 	if (ctrl == ssd->editbox) {
-	    dlg_editbox_set(ctrl, dlg, savedsession);
+	    dlg_editbox_set(ctrl, dlg, ssd->savedsession);
 	} else if (ctrl == ssd->listbox) {
 	    int i;
 	    dlg_update_start(ctrl, dlg);
@@ -646,14 +628,13 @@ static void sessionsaver_handler(union control *ctrl, void *dlg,
     } else if (event == EVENT_VALCHANGE) {
         int top, bottom, halfway, i;
 	if (ctrl == ssd->editbox) {
-	    char *tmp = dlg_editbox_get(ctrl, dlg);
-	    strncpy(savedsession, tmp, SAVEDSESSION_LEN);
-	    sfree(tmp);
+            sfree(ssd->savedsession);
+            ssd->savedsession = dlg_editbox_get(ctrl, dlg);
 	    top = ssd->sesslist.nsessions;
 	    bottom = -1;
 	    while (top-bottom > 1) {
 	        halfway = (top+bottom)/2;
-	        i = strcmp(savedsession, ssd->sesslist.sessions[halfway]);
+	        i = strcmp(ssd->savedsession, ssd->sesslist.sessions[halfway]);
 	        if (i <= 0 ) {
 		    top = halfway;
 	        } else {
@@ -677,29 +658,25 @@ static void sessionsaver_handler(union control *ctrl, void *dlg,
 	     * double-click on the list box _and_ that session
 	     * contains a hostname.
 	     */
-	    if (load_selected_session(ssd, savedsession, dlg, conf, &mbl) &&
+	    if (load_selected_session(ssd, dlg, conf, &mbl) &&
 		(mbl && ctrl == ssd->listbox && conf_launchable(conf))) {
 		dlg_end(dlg, 1);       /* it's all over, and succeeded */
 	    }
 	} else if (ctrl == ssd->savebutton) {
-	    int isdef = !strcmp(savedsession, "Default Settings");
-	    if (!savedsession[0]) {
+	    int isdef = !strcmp(ssd->savedsession, "Default Settings");
+	    if (!ssd->savedsession[0]) {
 		int i = dlg_listbox_index(ssd->listbox, dlg);
 		if (i < 0) {
 		    dlg_beep(dlg);
 		    return;
 		}
 		isdef = !strcmp(ssd->sesslist.sessions[i], "Default Settings");
-		if (!isdef) {
-		    strncpy(savedsession, ssd->sesslist.sessions[i],
-			    SAVEDSESSION_LEN);
-		    savedsession[SAVEDSESSION_LEN-1] = '\0';
-		} else {
-		    savedsession[0] = '\0';
-		}
+                sfree(ssd->savedsession);
+                ssd->savedsession = dupstr(isdef ? "" :
+                                           ssd->sesslist.sessions[i]);
 	    }
             {
-                char *errmsg = save_settings(savedsession, conf);
+                char *errmsg = save_settings(ssd->savedsession, conf);
                 if (errmsg) {
                     dlg_error_msg(dlg, errmsg);
                     sfree(errmsg);
@@ -737,8 +714,7 @@ static void sessionsaver_handler(union control *ctrl, void *dlg,
 		!conf_launchable(conf)) {
 		Conf *conf2 = conf_new();
 		int mbl = FALSE;
-		if (!load_selected_session(ssd, savedsession, dlg,
-					   conf2, &mbl)) {
+		if (!load_selected_session(ssd, dlg, conf2, &mbl)) {
 		    dlg_beep(dlg);
 		    conf_free(conf2);
 		    return;
@@ -855,8 +831,8 @@ static void colour_handler(union control *ctrl, void *dlg,
 	    } else {
 		clear = FALSE;
 		r = conf_get_int_int(conf, CONF_colours, i*3+0);
-		g = conf_get_int_int(conf, CONF_colours, i*3+0);
-		b = conf_get_int_int(conf, CONF_colours, i*3+0);
+		g = conf_get_int_int(conf, CONF_colours, i*3+1);
+		b = conf_get_int_int(conf, CONF_colours, i*3+2);
 	    }
 	    update = TRUE;
 	}
@@ -909,8 +885,8 @@ static void colour_handler(union control *ctrl, void *dlg,
 	     */
 	    if (dlg_coloursel_results(ctrl, dlg, &r, &g, &b)) {
 		conf_set_int_int(conf, CONF_colours, i*3+0, r);
-		conf_set_int_int(conf, CONF_colours, i*3+0, g);
-		conf_set_int_int(conf, CONF_colours, i*3+0, b);
+		conf_set_int_int(conf, CONF_colours, i*3+1, g);
+		conf_set_int_int(conf, CONF_colours, i*3+2, b);
 		clear = FALSE;
 		update = TRUE;
 	    }
@@ -1136,9 +1112,8 @@ static void portfwd_handler(union control *ctrl, void *dlg,
     } else if (event == EVENT_ACTION) {
 	if (ctrl == pfd->addbutton) {
 	    char *family, *type, *src, *key, *val;
-	    int i, whichbutton;
+	    int whichbutton;
 
-	    i = 0;
 #ifndef NO_IPV6
 	    whichbutton = dlg_radiobutton_get(pfd->addressfamily, dlg);
 	    if (whichbutton == 1)
@@ -1258,8 +1233,10 @@ void setup_config_box(struct controlbox *b, int midsession,
     char *str;
 
     ssd = (struct sessionsaver_data *)
-	ctrl_alloc(b, sizeof(struct sessionsaver_data));
+	ctrl_alloc_with_free(b, sizeof(struct sessionsaver_data),
+                             sessionsaver_data_free);
     memset(ssd, 0, sizeof(*ssd));
+    ssd->savedsession = dupstr("");
     ssd->midsession = midsession;
 
     /*
@@ -1380,13 +1357,13 @@ void setup_config_box(struct controlbox *b, int midsession,
     ctrl_columns(s, 1, 100);
 
     s = ctrl_getset(b, "Session", "otheropts", NULL);
-    c = ctrl_radiobuttons(s, "Close window on exit:", 'x', 4,
-			  HELPCTX(session_coe),
-			  conf_radiobutton_handler,
-			  I(CONF_close_on_exit),
-			  "Always", I(FORCE_ON),
-			  "Never", I(FORCE_OFF),
-			  "Only on clean exit", I(AUTO), NULL);
+    ctrl_radiobuttons(s, "Close window on exit:", 'x', 4,
+                      HELPCTX(session_coe),
+                      conf_radiobutton_handler,
+                      I(CONF_close_on_exit),
+                      "Always", I(FORCE_ON),
+                      "Never", I(FORCE_OFF),
+                      "Only on clean exit", I(AUTO), NULL);
 
     /*
      * The Session/Logging panel.
@@ -1800,9 +1777,13 @@ void setup_config_box(struct controlbox *b, int midsession,
     ctrl_checkbox(s, "Allow terminal to use xterm 256-colour mode", '2',
 		  HELPCTX(colours_xterm256), conf_checkbox_handler,
 		  I(CONF_xterm_256_colour));
-    ctrl_checkbox(s, "Bolded text is a different colour", 'b',
-		  HELPCTX(colours_bold),
-		  conf_checkbox_handler, I(CONF_bold_colour));
+    ctrl_radiobuttons(s, "Indicate bolded text by changing:", 'b', 3,
+                      HELPCTX(colours_bold),
+                      conf_radiobutton_handler, I(CONF_bold_style),
+                      "The font", I(1),
+                      "The colour", I(2),
+                      "Both", I(3),
+                      NULL);
 
     str = dupprintf("Adjust the precise colours %s displays", appname);
     s = ctrl_getset(b, "Window/Colours", "adjust", str);
@@ -2457,6 +2438,9 @@ void setup_config_box(struct controlbox *b, int midsession,
 	    ctrl_droplist(s, "Chokes on SSH-2 ignore messages", '2', 20,
 			  HELPCTX(ssh_bugs_ignore2),
 			  sshbug_handler, I(CONF_sshbug_ignore2));
+	    ctrl_droplist(s, "Chokes on PuTTY's SSH-2 'winadj' requests", 'j',
+                          20, HELPCTX(ssh_bugs_winadj),
+			  sshbug_handler, I(CONF_sshbug_winadj));
 	    ctrl_droplist(s, "Miscomputes SSH-2 HMAC keys", 'm', 20,
 			  HELPCTX(ssh_bugs_hmac2),
 			  sshbug_handler, I(CONF_sshbug_hmac2));

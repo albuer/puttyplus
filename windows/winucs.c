@@ -390,6 +390,8 @@ struct cp_list_item {
 };
 
 static const struct cp_list_item cp_list[] = {
+    {"UTF-8", CP_UTF8},
+
     {"ISO-8859-1:1998 (Latin-1, West Europe)", 0, 96, iso_8859_1},
     {"ISO-8859-2:1999 (Latin-2, East Europe)", 0, 96, iso_8859_2},
     {"ISO-8859-3:1999 (Latin-3, South Europe)", 0, 96, iso_8859_3},
@@ -405,8 +407,6 @@ static const struct cp_list_item cp_list[] = {
     {"ISO-8859-14:1998 (Latin-8, Celtic)", 0, 96, iso_8859_14},
     {"ISO-8859-15:1999 (Latin-9, \"euro\")", 0, 96, iso_8859_15},
     {"ISO-8859-16:2001 (Latin-10, Balkan)", 0, 96, iso_8859_16},
-
-    {"UTF-8", CP_UTF8},
 
     {"KOI8-U", 0, 128, koi8_u},
     {"KOI8-R", 20866},
@@ -1016,95 +1016,54 @@ int decode_codepage(char *cp_name)
     int codepage = -1;
     CPINFO cpinfo;
 
-    if (!*cp_name) {
-	/*
-	 * Here we select a plausible default code page based on
-	 * the locale the user is in. We wish to select an ISO code
-	 * page or appropriate local default _rather_ than go with
-	 * the Win125* series, because it's more important to have
-	 * CSI and friends enabled by default than the ghastly
-	 * Windows extra quote characters, and because it's more
-	 * likely the user is connecting to a remote server that
-	 * does something Unixy or VMSy and hence standards-
-	 * compliant than that they're connecting back to a Windows
-	 * box using horrible nonstandard charsets.
-	 * 
-	 * Accordingly, Robert de Bath suggests a method for
-	 * picking a default character set that runs as follows:
-	 * first call GetACP to get the system's ANSI code page
-	 * identifier, and translate as follows:
-	 * 
-	 * 1250 -> ISO 8859-2
-	 * 1251 -> KOI8-U
-	 * 1252 -> ISO 8859-1
-	 * 1253 -> ISO 8859-7
-	 * 1254 -> ISO 8859-9
-	 * 1255 -> ISO 8859-8
-	 * 1256 -> ISO 8859-6
-	 * 1257 -> ISO 8859-13 (changed from 8859-4 on advice of a Lithuanian)
-	 * 
-	 * and for anything else, choose direct-to-font.
-	 */
-	int cp = GetACP();
-	switch (cp) {
-	  case 1250: cp_name = "ISO-8859-2"; break;
-	  case 1251: cp_name = "KOI8-U"; break;
-	  case 1252: cp_name = "ISO-8859-1"; break;
-	  case 1253: cp_name = "ISO-8859-7"; break;
-	  case 1254: cp_name = "ISO-8859-9"; break;
-	  case 1255: cp_name = "ISO-8859-8"; break;
-	  case 1256: cp_name = "ISO-8859-6"; break;
-	  case 1257: cp_name = "ISO-8859-13"; break;
-	    /* default: leave it blank, which will select -1, direct->font */
-	}
+    if (!cp_name || !*cp_name)
+        return CP_UTF8;                /* default */
+
+    for (cpi = cp_list; cpi->name; cpi++) {
+        s = cp_name;
+        d = cpi->name;
+        for (;;) {
+            while (*s && !isalnum(*s) && *s != ':')
+                s++;
+            while (*d && !isalnum(*d) && *d != ':')
+                d++;
+            if (*s == 0) {
+                codepage = cpi->codepage;
+                if (codepage == CP_UTF8)
+                    goto break_break;
+                if (codepage == -1)
+                    return codepage;
+                if (codepage == 0) {
+                    codepage = 65536 + (cpi - cp_list);
+                    goto break_break;
+                }
+
+                if (GetCPInfo(codepage, &cpinfo) != 0)
+                    goto break_break;
+            }
+            if (tolower((unsigned char)*s++) != tolower((unsigned char)*d++))
+                break;
+        }
     }
 
-    if (cp_name && *cp_name)
-	for (cpi = cp_list; cpi->name; cpi++) {
-	    s = cp_name;
-	    d = cpi->name;
-	    for (;;) {
-		while (*s && !isalnum(*s) && *s != ':')
-		    s++;
-		while (*d && !isalnum(*d) && *d != ':')
-		    d++;
-		if (*s == 0) {
-		    codepage = cpi->codepage;
-		    if (codepage == CP_UTF8)
-			goto break_break;
-		    if (codepage == -1)
-			return codepage;
-		    if (codepage == 0) {
-			codepage = 65536 + (cpi - cp_list);
-			goto break_break;
-		    }
+    d = cp_name;
+    if (tolower((unsigned char)d[0]) == 'c' &&
+        tolower((unsigned char)d[1]) == 'p')
+        d += 2;
+    if (tolower((unsigned char)d[0]) == 'i' &&
+        tolower((unsigned char)d[1]) == 'b' &&
+        tolower((unsigned char)d[2]) == 'm')
+        d += 3;
+    for (s = d; *s >= '0' && *s <= '9'; s++);
+    if (*s == 0 && s != d)
+        codepage = atoi(d);	       /* CP999 or IBM999 */
 
-		    if (GetCPInfo(codepage, &cpinfo) != 0)
-			goto break_break;
-		}
-		if (tolower(*s++) != tolower(*d++))
-		    break;
-	    }
-	}
-
-    if (cp_name && *cp_name) {
-	d = cp_name;
-	if (tolower(d[0]) == 'c' && tolower(d[1]) == 'p')
-	    d += 2;
-	if (tolower(d[0]) == 'i' && tolower(d[1]) == 'b'
-	    && tolower(d[2]) == 'm')
-	    d += 3;
-	for (s = d; *s >= '0' && *s <= '9'; s++);
-	if (*s == 0 && s != d)
-	    codepage = atoi(d);	       /* CP999 or IBM999 */
-
-	if (codepage == CP_ACP)
-	    codepage = GetACP();
-	if (codepage == CP_OEMCP)
-	    codepage = GetOEMCP();
-	if (codepage > 65535)
-	    codepage = -2;
-    }
+    if (codepage == CP_ACP)
+        codepage = GetACP();
+    if (codepage == CP_OEMCP)
+        codepage = GetOEMCP();
+    if (codepage > 65535)
+        codepage = -2;
 
   break_break:;
     if (codepage != -1) {

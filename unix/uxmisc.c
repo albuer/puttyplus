@@ -6,25 +6,38 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
+#include <errno.h>
 #include <unistd.h>
+#include <time.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <pwd.h>
 
 #include "putty.h"
 
-long tickcount_offset = 0;
-
 unsigned long getticks(void)
 {
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
     /*
-     * We want to use milliseconds rather than microseconds,
-     * because we need a decent number of them to fit into a 32-bit
-     * word so it can be used for keepalives.
+     * We want to use milliseconds rather than the microseconds or
+     * nanoseconds given by the underlying clock functions, because we
+     * need a decent number of them to fit into a 32-bit word so it
+     * can be used for keepalives.
      */
-    return tv.tv_sec * 1000 + tv.tv_usec / 1000 + tickcount_offset;
+#if defined HAVE_CLOCK_GETTIME && defined HAVE_DECL_CLOCK_MONOTONIC
+    {
+        /* Use CLOCK_MONOTONIC if available, so as to be unconfused if
+         * the system clock changes. */
+        struct timespec ts;
+        if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0)
+            return ts.tv_sec * TICKSPERSEC +
+                ts.tv_nsec / (1000000000 / TICKSPERSEC);
+    }
+#endif
+    {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        return tv.tv_sec * TICKSPERSEC + tv.tv_usec / (1000000 / TICKSPERSEC);
+    }
 }
 
 Filename *filename_from_str(const char *str)
@@ -156,14 +169,70 @@ void pgp_fingerprints(void)
 }
 
 /*
- * Set FD_CLOEXEC on a file descriptor
+ * Set and clear fcntl options on a file descriptor. We don't
+ * realistically expect any of these operations to fail (the most
+ * plausible error condition is EBADF, but we always believe ourselves
+ * to be passing a valid fd so even that's an assertion-fail sort of
+ * response), so we don't make any effort to return sensible error
+ * codes to the caller - we just log to standard error and die
+ * unceremoniously. However, nonblock and no_nonblock do return the
+ * previous state of O_NONBLOCK.
  */
-int cloexec(int fd) {
+void cloexec(int fd) {
     int fdflags;
 
     fdflags = fcntl(fd, F_GETFD);
-    if (fdflags == -1) return -1;
-    return fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC);
+    if (fdflags < 0) {
+        fprintf(stderr, "%d: fcntl(F_GETFD): %s\n", fd, strerror(errno));
+        exit(1);
+    }
+    if (fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) < 0) {
+        fprintf(stderr, "%d: fcntl(F_SETFD): %s\n", fd, strerror(errno));
+        exit(1);
+    }
+}
+void noncloexec(int fd) {
+    int fdflags;
+
+    fdflags = fcntl(fd, F_GETFD);
+    if (fdflags < 0) {
+        fprintf(stderr, "%d: fcntl(F_GETFD): %s\n", fd, strerror(errno));
+        exit(1);
+    }
+    if (fcntl(fd, F_SETFD, fdflags & ~FD_CLOEXEC) < 0) {
+        fprintf(stderr, "%d: fcntl(F_SETFD): %s\n", fd, strerror(errno));
+        exit(1);
+    }
+}
+int nonblock(int fd) {
+    int fdflags;
+
+    fdflags = fcntl(fd, F_GETFL);
+    if (fdflags < 0) {
+        fprintf(stderr, "%d: fcntl(F_GETFL): %s\n", fd, strerror(errno));
+        exit(1);
+    }
+    if (fcntl(fd, F_SETFL, fdflags | O_NONBLOCK) < 0) {
+        fprintf(stderr, "%d: fcntl(F_SETFL): %s\n", fd, strerror(errno));
+        exit(1);
+    }
+
+    return fdflags & O_NONBLOCK;
+}
+int no_nonblock(int fd) {
+    int fdflags;
+
+    fdflags = fcntl(fd, F_GETFL);
+    if (fdflags < 0) {
+        fprintf(stderr, "%d: fcntl(F_GETFL): %s\n", fd, strerror(errno));
+        exit(1);
+    }
+    if (fcntl(fd, F_SETFL, fdflags & ~O_NONBLOCK) < 0) {
+        fprintf(stderr, "%d: fcntl(F_SETFL): %s\n", fd, strerror(errno));
+        exit(1);
+    }
+
+    return fdflags & O_NONBLOCK;
 }
 
 FILE *f_open(const Filename *filename, char const *mode, int is_private)

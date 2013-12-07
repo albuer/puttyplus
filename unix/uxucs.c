@@ -29,7 +29,6 @@ int mb_to_wc(int codepage, int flags, const char *mbstr, int mblen,
 	mbstate_t state;
 
 	memset(&state, 0, sizeof state);
-	setlocale(LC_CTYPE, "");
 
 	while (mblen > 0) {
 	    size_t i = mbrtowc(wcstr+n, mbstr, (size_t)mblen, &state);
@@ -39,8 +38,6 @@ int mb_to_wc(int codepage, int flags, const char *mbstr, int mblen,
 	    mbstr += i;
 	    mblen -= i;
 	}
-
-	setlocale(LC_CTYPE, "C");
 
 	return n;
     } else if (codepage == CS_NONE) {
@@ -73,7 +70,6 @@ int wc_to_mb(int codepage, int flags, const wchar_t *wcstr, int wclen,
 	int n = 0;
 
 	memset(&state, 0, sizeof state);
-	setlocale(LC_CTYPE, "");
 
 	while (wclen > 0) {
 	    int i = wcrtomb(output, wcstr[0], &state);
@@ -84,8 +80,6 @@ int wc_to_mb(int codepage, int flags, const wchar_t *wcstr, int wclen,
 	    wcstr++;
 	    wclen--;
 	}
-
-	setlocale(LC_CTYPE, "C");
 
 	return n;
     } else if (codepage == CS_NONE) {
@@ -259,17 +253,19 @@ const char *cp_name(int codepage)
 const char *cp_enumerate(int index)
 {
     int charset;
-    if (index == 0)
-	return "Use font encoding";
-    charset = charset_localenc_nth(index-1);
-    if (charset == CS_NONE)
+    charset = charset_localenc_nth(index);
+    if (charset == CS_NONE) {
+        /* "Use font encoding" comes after all the named charsets */
+        if (charset_localenc_nth(index-1) != CS_NONE)
+            return "Use font encoding";
 	return NULL;
+    }
     return charset_to_localenc(charset);
 }
 
 int decode_codepage(char *cp_name)
 {
-    if (!*cp_name)
-	return CS_NONE;		       /* use font encoding */
+    if (!cp_name || !*cp_name)
+	return CS_UTF8;
     return charset_from_localenc(cp_name);
 }

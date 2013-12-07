@@ -1065,32 +1065,32 @@ static termline *lineptr(Terminal *term, int y, int lineno, int screen)
 static void term_schedule_tblink(Terminal *term);
 static void term_schedule_cblink(Terminal *term);
 
-static void term_timer(void *ctx, long now)
+static void term_timer(void *ctx, unsigned long now)
 {
     Terminal *term = (Terminal *)ctx;
     int update = FALSE;
 
-    if (term->tblink_pending && now - term->next_tblink >= 0) {
+    if (term->tblink_pending && now == term->next_tblink) {
 	term->tblinker = !term->tblinker;
 	term->tblink_pending = FALSE;
 	term_schedule_tblink(term);
 	update = TRUE;
     }
 
-    if (term->cblink_pending && now - term->next_cblink >= 0) {
+    if (term->cblink_pending && now == term->next_cblink) {
 	term->cblinker = !term->cblinker;
 	term->cblink_pending = FALSE;
 	term_schedule_cblink(term);
 	update = TRUE;
     }
 
-    if (term->in_vbell && now - term->vbell_end >= 0) {
+    if (term->in_vbell && now == term->vbell_end) {
 	term->in_vbell = FALSE;
 	update = TRUE;
     }
 
     if (update ||
-	(term->window_update_pending && now - term->next_update >= 0))
+	(term->window_update_pending && now == term->next_update))
 	term_update(term);
 }
 
@@ -1224,7 +1224,10 @@ static void power_on(Terminal *term, int clear)
     term->alt_which = 0;
     term_print_finish(term);
     term->xterm_mouse = 0;
+    term->xterm_extended_mouse = 0;
+    term->urxvt_extended_mouse = 0;
     set_raw_mouse_mode(term->frontend, FALSE);
+    term->bracketed_paste = FALSE;
     {
 	int i;
 	for (i = 0; i < 256; i++)
@@ -1620,9 +1623,13 @@ void term_free(Terminal *term)
     for (i = 0; i < term->bidi_cache_size; i++) {
 	sfree(term->pre_bidi_cache[i].chars);
 	sfree(term->post_bidi_cache[i].chars);
+        sfree(term->post_bidi_cache[i].forward);
+        sfree(term->post_bidi_cache[i].backward);
     }
     sfree(term->pre_bidi_cache);
     sfree(term->post_bidi_cache);
+
+    sfree(term->tabs);
 
     expire_timer_context(term);
 
@@ -1712,7 +1719,8 @@ void term_size(Terminal *term, int newrows, int newcols, int newsavelines)
     while (term->rows > newrows) {
 	if (term->curs.y < term->rows - 1) {
 	    /* delete bottom row, unless it contains the cursor */
-	    sfree(delpos234(term->screen, term->rows - 1));
+            line = delpos234(term->screen, term->rows - 1);
+            freeline(line);
 	} else {
 	    /* push top row to scrollback */
 	    line = delpos234(term->screen, 0);
@@ -1974,7 +1982,7 @@ static void check_selection(Terminal *term, pos from, pos to)
 static void scroll(Terminal *term, int topline, int botline, int lines, int sb)
 {
     termline *line;
-    int i, seltop;
+    int i, seltop, scrollwinsize;
 #ifdef OPTIMISE_SCROLL
     int olddisptop, shift;
 #endif /* OPTIMISE_SCROLL */
@@ -1986,8 +1994,14 @@ static void scroll(Terminal *term, int topline, int botline, int lines, int sb)
     olddisptop = term->disptop;
     shift = lines;
 #endif /* OPTIMISE_SCROLL */
+
+    scrollwinsize = botline - topline + 1;
+
     if (lines < 0) {
-	while (lines < 0) {
+        lines = -lines;
+        if (lines > scrollwinsize)
+            lines = scrollwinsize;
+	while (lines-- > 0) {
 	    line = delpos234(term->screen, botline);
             resizeline(term, line, term->cols);
 	    for (i = 0; i < term->cols; i++)
@@ -2009,11 +2023,11 @@ static void scroll(Terminal *term, int topline, int botline, int lines, int sb)
 		    term->selend.x = 0;
 		}
 	    }
-
-	    lines++;
 	}
     } else {
-	while (lines > 0) {
+        if (lines > scrollwinsize)
+            lines = scrollwinsize;
+	while (lines-- > 0) {
 	    line = delpos234(term->screen, topline);
 #ifdef TERM_CC_DIAGS
 	    cc_check(line);
@@ -2099,8 +2113,6 @@ static void scroll(Terminal *term, int topline, int botline, int lines, int sb)
 		    }
 		}
 	    }
-
-	    lines--;
 	}
     }
 #ifdef OPTIMISE_SCROLL
@@ -2483,6 +2495,12 @@ static void toggle_mode(Terminal *term, int mode, int query, int state)
 	    term->xterm_mouse = state ? 2 : 0;
 	    set_raw_mouse_mode(term->frontend, state);
 	    break;
+	  case 1006:		       /* xterm extended mouse */
+	    term->xterm_extended_mouse = state ? 1 : 0;
+	    break;
+	  case 1015:		       /* urxvt extended mouse */
+	    term->urxvt_extended_mouse = state ? 1 : 0;
+	    break;
 	  case 1047:                   /* alternate screen */
 	    compatibility(OTHER);
 	    deselect(term);
@@ -2504,6 +2522,9 @@ static void toggle_mode(Terminal *term, int mode, int query, int state)
 	    if (!state && !term->no_alt_screen)
 		save_cursor(term, state);
 	    term->disptop = 0;
+	    break;
+	  case 2004:		       /* xterm bracketed paste */
+	    term->bracketed_paste = state ? TRUE : FALSE;
 	    break;
     } else
 	switch (mode) {
@@ -3018,8 +3039,8 @@ static void term_out(Terminal *term)
 			width = 1;
 		    if (!width)
 			width = (term->cjk_ambig_wide ?
-				 mk_wcwidth_cjk((wchar_t) c) :
-				 mk_wcwidth((wchar_t) c));
+				 mk_wcwidth_cjk((unsigned int) c) :
+				 mk_wcwidth((unsigned int) c));
 
 		    if (term->wrapnext && term->wrap && width > 0) {
 			cline->lattr |= LATTR_WRAPPED;
@@ -4694,7 +4715,7 @@ static termchar *term_bidi_line(Terminal *term, struct termline *ldata,
 		}
 
 		term->wcFrom[it].origwc = term->wcFrom[it].wc =
-		    (wchar_t)uc;
+		    (unsigned int)uc;
 		term->wcFrom[it].index = it;
 	    }
 
@@ -5017,11 +5038,13 @@ static void do_paint(Terminal *term, Context ctx, int may_optimise)
 
 	    break_run = ((tattr ^ attr) & term->attr_mask) != 0;
 
+#ifdef USES_VTLINE_HACK
 	    /* Special hack for VT100 Linedraw glyphs */
 	    if ((tchar >= 0x23BA && tchar <= 0x23BD) ||
                 (j > 0 && (newline[j-1].chr >= 0x23BA &&
                            newline[j-1].chr <= 0x23BD)))
 		break_run = TRUE;
+#endif
 
 	    /*
 	     * Separate out sequences of characters that have the
@@ -5069,10 +5092,17 @@ static void do_paint(Terminal *term, Context ctx, int may_optimise)
 		dirty_run = TRUE;
 	    }
 
-	    if (ccount >= chlen) {
+	    if (ccount+2 > chlen) {
 		chlen = ccount + 256;
 		ch = sresize(ch, chlen, wchar_t);
 	    }
+
+#ifdef PLATFORM_IS_UTF16
+	    if (tchar > 0x10000 && tchar < 0x110000) {
+		ch[ccount++] = (wchar_t) HIGH_SURROGATE_OF(tchar);
+		ch[ccount++] = (wchar_t) LOW_SURROGATE_OF(tchar);
+	    } else
+#endif /* PLATFORM_IS_UTF16 */
 	    ch[ccount++] = (wchar_t) tchar;
 
 	    if (d->cc_next) {
@@ -5096,10 +5126,17 @@ static void do_paint(Terminal *term, Context ctx, int may_optimise)
 			break;
 		    }
 
-		    if (ccount >= chlen) {
+		    if (ccount+2 > chlen) {
 			chlen = ccount + 256;
 			ch = sresize(ch, chlen, wchar_t);
 		    }
+
+#ifdef PLATFORM_IS_UTF16
+		    if (schar > 0x10000 && schar < 0x110000) {
+			ch[ccount++] = (wchar_t) HIGH_SURROGATE_OF(schar);
+			ch[ccount++] = (wchar_t) LOW_SURROGATE_OF(schar);
+		    } else
+#endif /* PLATFORM_IS_UTF16 */
 		    ch[ccount++] = (wchar_t) schar;
 		}
 
@@ -5887,7 +5924,8 @@ static pos sel_spread_half(Terminal *term, pos p, int dir)
 		    else
 			break;
 		} else {
-		    if (ldata->lattr & LATTR_WRAPPED) {
+		    if (p.y+1 < term->rows && 
+                        (ldata->lattr & LATTR_WRAPPED)) {
 			termline *ldata2;
 			ldata2 = lineptr(p.y+1);
 			if (wordtype(term, UCSGET(ldata2->chars, 0))
@@ -5972,7 +6010,12 @@ void term_do_paste(Terminal *term)
         if (term->paste_buffer)
             sfree(term->paste_buffer);
         term->paste_pos = term->paste_hold = term->paste_len = 0;
-        term->paste_buffer = snewn(len, wchar_t);
+        term->paste_buffer = snewn(len + 12, wchar_t);
+
+        if (term->bracketed_paste) {
+            memcpy(term->paste_buffer, L"\033[200~", 6 * sizeof(wchar_t));
+            term->paste_len += 6;
+        }
 
         p = q = data;
         while (p < data + len) {
@@ -5994,6 +6037,12 @@ void term_do_paste(Terminal *term)
                 p += sel_nl_sz;
             }
             q = p;
+        }
+
+        if (term->bracketed_paste) {
+            memcpy(term->paste_buffer + term->paste_len,
+                   L"\033[201~", 6 * sizeof(wchar_t));
+            term->paste_len += 6;
         }
 
         /* Assume a small paste will be OK in one go. */
@@ -6067,25 +6116,26 @@ void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
     if (raw_mouse &&
 	(term->selstate != ABOUT_TO) && (term->selstate != DRAGGING)) {
 	int encstate = 0, r, c;
-	char abuf[16];
+	char abuf[32];
+	int len = 0;
 
 	if (term->ldisc) {
 
 	    switch (braw) {
 	      case MBT_LEFT:
-		encstate = 0x20;	       /* left button down */
+		encstate = 0x00;	       /* left button down */
 		break;
 	      case MBT_MIDDLE:
-		encstate = 0x21;
+		encstate = 0x01;
 		break;
 	      case MBT_RIGHT:
-		encstate = 0x22;
+		encstate = 0x02;
 		break;
 	      case MBT_WHEEL_UP:
-		encstate = 0x60;
+		encstate = 0x40;
 		break;
 	      case MBT_WHEEL_DOWN:
-		encstate = 0x61;
+		encstate = 0x41;
 		break;
 	      default: break;	       /* placate gcc warning about enum use */
 	    }
@@ -6096,7 +6146,9 @@ void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
 		encstate += 0x20;
 		break;
 	      case MA_RELEASE:
-		encstate = 0x23;
+		/* If multiple extensions are enabled, the xterm 1006 is used, so it's okay to check for only that */
+		if (!term->xterm_extended_mouse)
+		    encstate = 0x03;
 		term->mouse_is_down = 0;
 		break;
 	      case MA_CLICK:
@@ -6110,11 +6162,18 @@ void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
 		encstate += 0x04;
 	    if (ctrl)
 		encstate += 0x10;
-	    r = y + 33;
-	    c = x + 33;
+	    r = y + 1;
+	    c = x + 1;
 
-	    sprintf(abuf, "\033[M%c%c%c", encstate, c, r);
-	    ldisc_send(term->ldisc, abuf, 6, 0);
+	    /* Check the extensions in decreasing order of preference. Encoding the release event above assumes that 1006 comes first. */
+	    if (term->xterm_extended_mouse) {
+		len = sprintf(abuf, "\033[<%d;%d;%d%c", encstate, c, r, a == MA_RELEASE ? 'm' : 'M');
+	    } else if (term->urxvt_extended_mouse) {
+		len = sprintf(abuf, "\033[%d;%d;%dM", encstate + 32, c, r);
+	    } else if (c <= 223 && r <= 223) {
+		len = sprintf(abuf, "\033[M%c%c%c", encstate + 32, c + 32, r + 32);
+	    }
+	    ldisc_send(term->ldisc, abuf, len, 0);
 	}
 	return;
     }
@@ -6233,6 +6292,13 @@ void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
 	request_paste(term->frontend);
     }
 
+    /*
+     * Since terminal output is suppressed during drag-selects, we
+     * should make sure to write any pending output if one has just
+     * finished.
+     */
+    if (term->selstate != DRAGGING)
+        term_out(term);
     term_update(term);
 }
 
@@ -6270,433 +6336,6 @@ int format_arrow_key(char *buf, Terminal *term, int xkey, int ctrl)
     }
 
     return p - buf;
-}
-
-void term_key(Terminal *term, Key_Sym keysym, wchar_t *text, size_t tlen,
-	      unsigned int modifiers, unsigned int flags)
-{
-    char output[10];
-    char *p = output;
-    int prependesc = FALSE;
-#if 0
-    int i;
-
-    fprintf(stderr, "keysym = %d, %d chars:", keysym, tlen);
-    for (i = 0; i < tlen; i++)
-	fprintf(stderr, " %04x", (unsigned)text[i]);
-    fprintf(stderr, "\n");
-#endif
-
-    /* XXX Num Lock */
-    if ((flags & PKF_REPEAT) && term->repeat_off)
-	return;
-
-    /* Currently, Meta always just prefixes everything with ESC. */
-    if (modifiers & PKM_META)
-	prependesc = TRUE;
-    modifiers &= ~PKM_META;
-
-    /*
-     * Alt is only used for Alt+keypad, which isn't supported yet, so
-     * ignore it.
-     */
-    modifiers &= ~PKM_ALT;
-
-    /* Standard local function keys */
-    switch (modifiers & (PKM_SHIFT | PKM_CONTROL)) {
-      case PKM_SHIFT:
-	if (keysym == PK_PAGEUP)
-	    /* scroll up one page */;
-	if (keysym == PK_PAGEDOWN)
-	    /* scroll down on page */;
-	if (keysym == PK_INSERT)
-	    term_do_paste(term);
-	break;
-      case PKM_CONTROL:
-	if (keysym == PK_PAGEUP)
-	    /* scroll up one line */;
-	if (keysym == PK_PAGEDOWN)
-	    /* scroll down one line */;
-	/* Control-Numlock for app-keypad mode switch */
-	if (keysym == PK_PF1)
-	    term->app_keypad_keys ^= 1;
-	break;
-    }
-
-    if (modifiers & PKM_ALT) {
-	/* Alt+F4 (close) */
-	/* Alt+Return (full screen) */
-	/* Alt+Space (system menu) */
-    }
-
-    if (keysym == PK_NULL && (modifiers & PKM_CONTROL) && tlen == 1 &&
-	text[0] >= 0x20 && text[0] <= 0x7e) {
-	/* ASCII chars + Control */
-	if ((text[0] >= 0x40 && text[0] <= 0x5f) ||
-	    (text[0] >= 0x61 && text[0] <= 0x7a))
-	    text[0] &= 0x1f;
-	else {
-	    /*
-	     * Control-2 should return ^@ (0x00), Control-6 should return
-	     * ^^ (0x1E), and Control-Minus should return ^_ (0x1F). Since
-	     * the DOS keyboard handling did it, and we have nothing better
-	     * to do with the key combo in question, we'll also map
-	     * Control-Backquote to ^\ (0x1C).
-	     */
-	    switch (text[0]) {
-	      case ' ': text[0] = 0x00; break;
-	      case '-': text[0] = 0x1f; break;
-	      case '/': text[0] = 0x1f; break;
-	      case '2': text[0] = 0x00; break;
-	      case '3': text[0] = 0x1b; break;
-	      case '4': text[0] = 0x1c; break;
-	      case '5': text[0] = 0x1d; break;
-	      case '6': text[0] = 0x1e; break;
-	      case '7': text[0] = 0x1f; break;
-	      case '8': text[0] = 0x7f; break;
-	      case '`': text[0] = 0x1c; break;
-	    }
-	}
-    }
-
-    /* Nethack keypad */
-    if (term->nethack_keypad) {
-	char c = 0;
-	switch (keysym) {
-	  case PK_KP1: c = 'b'; break;
-	  case PK_KP2: c = 'j'; break;
-	  case PK_KP3: c = 'n'; break;
-	  case PK_KP4: c = 'h'; break;
-	  case PK_KP5: c = '.'; break;
-	  case PK_KP6: c = 'l'; break;
-	  case PK_KP7: c = 'y'; break;
-	  case PK_KP8: c = 'k'; break;
-	  case PK_KP9: c = 'u'; break;
-	  default: break; /* else gcc warns `enum value not used' */
-	}
-	if (c != 0) {
-	    if (c != '.') {
-		if (modifiers & PKM_CONTROL)
-		    c &= 0x1f;
-		else if (modifiers & PKM_SHIFT)
-			c = toupper((unsigned char)c);
-	    }
-	    *p++ = c;
-	    goto done;
-	}
-    }
-
-    /* Numeric Keypad */
-    if (PK_ISKEYPAD(keysym)) {
-	int xkey = 0;
-
-	/*
-	 * In VT400 mode, PFn always emits an escape sequence.  In
-	 * Linux and tilde modes, this only happens in app keypad mode.
-	 */
-	if (term->funky_type == FUNKY_VT400 ||
-	    ((term->funky_type == FUNKY_LINUX ||
-	      term->funky_type == FUNKY_TILDE) &&
-	     term->app_keypad_keys && !term->no_applic_k)) {
-	    switch (keysym) {
-	      case PK_PF1: xkey = 'P'; break;
-	      case PK_PF2: xkey = 'Q'; break;
-	      case PK_PF3: xkey = 'R'; break;
-	      case PK_PF4: xkey = 'S'; break;
-	      default: break; /* else gcc warns `enum value not used' */
-	    }
-	}
-	if (term->app_keypad_keys && !term->no_applic_k) {
-	    switch (keysym) {
-	      case PK_KP0: xkey = 'p'; break;
-	      case PK_KP1: xkey = 'q'; break;
-	      case PK_KP2: xkey = 'r'; break;
-	      case PK_KP3: xkey = 's'; break;
-	      case PK_KP4: xkey = 't'; break;
-	      case PK_KP5: xkey = 'u'; break;
-	      case PK_KP6: xkey = 'v'; break;
-	      case PK_KP7: xkey = 'w'; break;
-	      case PK_KP8: xkey = 'x'; break;
-	      case PK_KP9: xkey = 'y'; break;
-	      case PK_KPDECIMAL: xkey = 'n'; break;
-	      case PK_KPENTER: xkey = 'M'; break;
-	      default: break; /* else gcc warns `enum value not used' */
-	    }
-	    if (term->funky_type == FUNKY_XTERM && tlen > 0) {
-		/*
-		 * xterm can't see the layout of the keypad, so it has
-		 * to rely on the X keysyms returned by the keys.
-		 * Hence, we look at the strings here, not the PuTTY
-		 * keysyms (which describe the layout).
-		 */
-		switch (text[0]) {
-		  case '+':
-		    if (modifiers & PKM_SHIFT)
-			xkey = 'l';
-		    else
-			xkey = 'k';
-		    break;
-		  case '/': xkey = 'o'; break;
-		  case '*': xkey = 'j'; break;
-		  case '-': xkey = 'm'; break;
-		}
-	    } else {
-		/*
-		 * In all other modes, we try to retain the layout of
-		 * the DEC keypad in application mode.
-		 */
-		switch (keysym) {
-		  case PK_KPBIGPLUS:
-		    /* This key covers the '-' and ',' keys on a VT220 */
-		    if (modifiers & PKM_SHIFT)
-			xkey = 'm'; /* VT220 '-' */
-		    else
-			xkey = 'l'; /* VT220 ',' */
-		    break;
-		  case PK_KPMINUS: xkey = 'm'; break;
-		  case PK_KPCOMMA: xkey = 'l'; break;
-		  default: break; /* else gcc warns `enum value not used' */
-		}
-	    }
-	}
-	if (xkey) {
-	    if (term->vt52_mode) {
-		if (xkey >= 'P' && xkey <= 'S')
-		    p += sprintf((char *) p, "\x1B%c", xkey);
-		else
-		    p += sprintf((char *) p, "\x1B?%c", xkey);
-	    } else
-		p += sprintf((char *) p, "\x1BO%c", xkey);
-	    goto done;
-	}
-	/* Not in application mode -- treat the number pad as arrow keys? */
-	if ((flags & PKF_NUMLOCK) == 0) {
-	    switch (keysym) {
-	      case PK_KP0: keysym = PK_INSERT; break;
-	      case PK_KP1: keysym = PK_END; break;
-	      case PK_KP2: keysym = PK_DOWN; break;
-	      case PK_KP3: keysym = PK_PAGEDOWN; break;
-	      case PK_KP4: keysym = PK_LEFT; break;
-	      case PK_KP5: keysym = PK_REST; break;
-	      case PK_KP6: keysym = PK_RIGHT; break;
-	      case PK_KP7: keysym = PK_HOME; break;
-	      case PK_KP8: keysym = PK_UP; break;
-	      case PK_KP9: keysym = PK_PAGEUP; break;
-	      default: break; /* else gcc warns `enum value not used' */
-	    }
-	}
-    }
-
-    /* Miscellaneous keys */
-    switch (keysym) {
-      case PK_ESCAPE:
-	*p++ = 0x1b;
-	goto done;
-      case PK_BACKSPACE:
-	    if (modifiers == 0)
-		*p++ = (term->bksp_is_delete ? 0x7F : 0x08);
-	    else if (modifiers == PKM_SHIFT)
-		/* We do the opposite of what is configured */
-		*p++ = (term->bksp_is_delete ? 0x08 : 0x7F);
-	    else break;
-	    goto done;
-      case PK_TAB:
-	if (modifiers == 0)
-	    *p++ = 0x09;
-	else if (modifiers == PKM_SHIFT)
-	    *p++ = 0x1B, *p++ = '[', *p++ = 'Z';
-	else break;
-	goto done;
-	/* XXX window.c has ctrl+shift+space sending 0xa0 */
-      case PK_PAUSE:
-	if (modifiers == PKM_CONTROL)
-	    *p++ = 26;
-	else break;
-	goto done;
-      case PK_RETURN:
-      case PK_KPENTER: /* Odd keypad modes handled above */
-	if (modifiers == 0) {
-	    *p++ = 0x0d;
-	    if (term->cr_lf_return)
-		*p++ = 0x0a;
-	    goto done;
-	}
-      default: break; /* else gcc warns `enum value not used' */
-    }
-
-    /* SCO function keys and editing keys */
-    if (term->funky_type == FUNKY_SCO) {
-	if (PK_ISFKEY(keysym) && keysym <= PK_F12) {
-	    static char const codes[] =
-		"MNOPQRSTUVWX" "YZabcdefghij" "klmnopqrstuv" "wxyz@[\\]^_`{";
-	    int index = keysym - PK_F1;
-
-	    if (modifiers & PKM_SHIFT) index += 12;
-	    if (modifiers & PKM_CONTROL) index += 24;
-	    p += sprintf((char *) p, "\x1B[%c", codes[index]);
-	    goto done;
-	}
-	if (PK_ISEDITING(keysym)) {
-	    int xkey = 0;
-
-	    switch (keysym) {
-	      case PK_DELETE:   *p++ = 0x7f; goto done;
-	      case PK_HOME:     xkey = 'H'; break;
-	      case PK_INSERT:   xkey = 'L'; break;
-	      case PK_END:      xkey = 'F'; break;
-	      case PK_PAGEUP:   xkey = 'I'; break;
-	      case PK_PAGEDOWN: xkey = 'G'; break;
-	      default: break; /* else gcc warns `enum value not used' */
-	    }
-	    p += sprintf((char *) p, "\x1B[%c", xkey);
-	}
-    }
-
-    if (PK_ISEDITING(keysym) && (modifiers & PKM_SHIFT) == 0) {
-	int code;
-
-	if (term->funky_type == FUNKY_XTERM) {
-	    /* Xterm shuffles these keys, apparently. */
-	    switch (keysym) {
-	      case PK_HOME:     keysym = PK_INSERT;   break;
-	      case PK_INSERT:   keysym = PK_HOME;     break;
-	      case PK_DELETE:   keysym = PK_END;      break;
-	      case PK_END:      keysym = PK_PAGEUP;   break;
-	      case PK_PAGEUP:   keysym = PK_DELETE;   break;
-	      case PK_PAGEDOWN: keysym = PK_PAGEDOWN; break;
-	      default: break; /* else gcc warns `enum value not used' */
-	    }
-	}
-
-	/* RXVT Home/End */
-	if (term->rxvt_homeend &&
-	    (keysym == PK_HOME || keysym == PK_END)) {
-	    p += sprintf((char *) p, keysym == PK_HOME ? "\x1B[H" : "\x1BOw");
-	    goto done;
-	}
-
-	if (term->vt52_mode) {
-	    int xkey;
-
-	    /*
-	     * A real VT52 doesn't have these, and a VT220 doesn't
-	     * send anything for them in VT52 mode.
-	     */
-	    switch (keysym) {
-	      case PK_HOME:     xkey = 'H'; break;
-	      case PK_INSERT:   xkey = 'L'; break;
-	      case PK_DELETE:   xkey = 'M'; break;
-	      case PK_END:      xkey = 'E'; break;
-	      case PK_PAGEUP:   xkey = 'I'; break;
-	      case PK_PAGEDOWN: xkey = 'G'; break;
-	      default: xkey=0; break; /* else gcc warns `enum value not used'*/
-	    }
-	    p += sprintf((char *) p, "\x1B%c", xkey);
-	    goto done;
-	}
-
-	switch (keysym) {
-	  case PK_HOME:     code = 1; break;
-	  case PK_INSERT:   code = 2; break;
-	  case PK_DELETE:   code = 3; break;
-	  case PK_END:      code = 4; break;
-	  case PK_PAGEUP:   code = 5; break;
-	  case PK_PAGEDOWN: code = 6; break;
-	  default: code = 0; break; /* else gcc warns `enum value not used' */
-	}
-	p += sprintf((char *) p, "\x1B[%d~", code);
-	goto done;
-    }
-
-    if (PK_ISFKEY(keysym)) {
-	/* Map Shift+F1-F10 to F11-F20 */
-	if (keysym >= PK_F1 && keysym <= PK_F10 && (modifiers & PKM_SHIFT))
-	    keysym += 10;
-	if ((term->vt52_mode || term->funky_type == FUNKY_VT100P) &&
-	    keysym <= PK_F14) {
-	    /* XXX This overrides the XTERM/VT52 mode below */
-	    int offt = 0;
-	    if (keysym >= PK_F6)  offt++;
-	    if (keysym >= PK_F12) offt++;
-	    p += sprintf((char *) p, term->vt52_mode ? "\x1B%c" : "\x1BO%c",
-			 'P' + keysym - PK_F1 - offt);
-	    goto done;
-	}
-	if (term->funky_type == FUNKY_LINUX && keysym <= PK_F5) {
-	    p += sprintf((char *) p, "\x1B[[%c", 'A' + keysym - PK_F1);
-	    goto done;
-	}
-	if (term->funky_type == FUNKY_XTERM && keysym <= PK_F4) {
-	    if (term->vt52_mode)
-		p += sprintf((char *) p, "\x1B%c", 'P' + keysym - PK_F1);
-	    else
-		p += sprintf((char *) p, "\x1BO%c", 'P' + keysym - PK_F1);
-	    goto done;
-	}
-	p += sprintf((char *) p, "\x1B[%d~", 11 + keysym - PK_F1);
-	goto done;
-    }
-
-    if (PK_ISCURSOR(keysym)) {
-	int xkey;
-
-	switch (keysym) {
-	  case PK_UP:    xkey = 'A'; break;
-	  case PK_DOWN:  xkey = 'B'; break;
-	  case PK_RIGHT: xkey = 'C'; break;
-	  case PK_LEFT:  xkey = 'D'; break;
-	  case PK_REST:  xkey = 'G'; break; /* centre key on number pad */
-	  default: xkey = 0; break; /* else gcc warns `enum value not used' */
-	}
-	p += format_arrow_key(p, term, xkey, modifiers == PKM_CONTROL);
-	goto done;
-    }
-
-  done:
-    if (p > output || tlen > 0) {
-	/*
-	 * Interrupt an ongoing paste. I'm not sure
-	 * this is sensible, but for the moment it's
-	 * preferable to having to faff about buffering
-	 * things.
-	 */
-	term_nopaste(term);
-
-	/*
-	 * We need not bother about stdin backlogs
-	 * here, because in GUI PuTTY we can't do
-	 * anything about it anyway; there's no means
-	 * of asking Windows to hold off on KEYDOWN
-	 * messages. We _have_ to buffer everything
-	 * we're sent.
-	 */
-	term_seen_key_event(term);
-
-	if (prependesc) {
-#if 0
-	    fprintf(stderr, "sending ESC\n");
-#endif
-	    ldisc_send(term->ldisc, "\x1b", 1, 1);
-	}
-
-	if (p > output) {
-#if 0
-	    fprintf(stderr, "sending %d bytes:", p - output);
-	    for (i = 0; i < p - output; i++)
-		fprintf(stderr, " %02x", output[i]);
-	    fprintf(stderr, "\n");
-#endif
-	    ldisc_send(term->ldisc, output, p - output, 1);
-	} else if (tlen > 0) {
-#if 0
-	    fprintf(stderr, "sending %d unichars:", tlen);
-	    for (i = 0; i < tlen; i++)
-		fprintf(stderr, " %04x", (unsigned) text[i]);
-	    fprintf(stderr, "\n");
-#endif
-	    luni_send(term->ldisc, text, tlen, 1);
-	}
-    }
 }
 
 void term_nopaste(Terminal *term)
@@ -6759,6 +6398,14 @@ void term_deselect(Terminal *term)
 {
     deselect(term);
     term_update(term);
+
+    /*
+     * Since terminal output is suppressed during drag-selects, we
+     * should make sure to write any pending output if one has just
+     * finished.
+     */
+    if (term->selstate != DRAGGING)
+        term_out(term);
 }
 
 int term_ldisc(Terminal *term, int option)

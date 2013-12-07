@@ -60,11 +60,6 @@ unsigned long getticks(void);	       /* based on gettimeofday(2) */
 #define GETTICKCOUNT getticks
 #define TICKSPERSEC    1000	       /* we choose to use milliseconds */
 #define CURSORBLINK     450	       /* no standard way to set this */
-/* getticks() works using gettimeofday(), so it's vulnerable to system clock
- * changes causing chaos. Therefore, we provide a compensation mechanism. */
-#define TIMING_SYNC
-#define TIMING_SYNC_ANOW
-extern long tickcount_offset;
 
 #define WCHAR wchar_t
 #define BYTE unsigned char
@@ -93,11 +88,16 @@ void *get_window(void *frontend);      /* void * to avoid depending on gtk.h */
 int do_config_box(const char *title, Conf *conf,
 		  int midsession, int protcfginfo);
 void fatal_message_box(void *window, char *msg);
+void nonfatal_message_box(void *window, char *msg);
 void about_box(void *window);
 void *eventlogstuff_new(void);
 void showeventlog(void *estuff, void *parentwin);
 void logevent_dlg(void *estuff, const char *string);
 int reallyclose(void *frontend);
+#ifdef MAY_REFER_TO_GTK_IN_HEADERS
+int messagebox(GtkWidget *parentwin, char *title, char *msg, int minwid, ...);
+int string_width(char *text);
+#endif
 
 /* Things pterm.c needs from {ptermm,uxputty}.c */
 char *make_default_wintitle(char *hostname);
@@ -156,7 +156,10 @@ void (*putty_signal(int sig, void (*func)(int)))(int);
 void block_signal(int sig, int block_it);
 
 /* uxmisc.c */
-int cloexec(int);
+void cloexec(int);
+void noncloexec(int);
+int nonblock(int);
+int no_nonblock(int);
 
 /*
  * Exports from unicode.c.

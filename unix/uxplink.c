@@ -63,6 +63,22 @@ void modalfatalbox(char *p, ...)
     }
     cleanup_exit(1);
 }
+void nonfatal(char *p, ...)
+{
+    struct termios cf;
+    va_list ap;
+    premsg(&cf);
+    fprintf(stderr, "ERROR: ");
+    va_start(ap, p);
+    vfprintf(stderr, p, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+    postmsg(&cf);
+    if (logctx) {
+        log_free(logctx);
+        logctx = NULL;
+    }
+}
 void connection_fatal(void *frontend, char *p, ...)
 {
     struct termios cf;
@@ -116,12 +132,6 @@ char *platform_default_s(const char *name)
 
 int platform_default_i(const char *name, int def)
 {
-    if (!strcmp(name, "TermWidth") ||
-	!strcmp(name, "TermHeight")) {
-	struct winsize size;
-	if (ioctl(STDIN_FILENO, TIOCGWINSZ, (void *)&size) >= 0)
-	    return (!strcmp(name, "TermWidth") ? size.ws_col : size.ws_row);
-    }
     return def;
 }
 
@@ -386,20 +396,18 @@ int try_output(int is_stderr)
     bufchain *chain = (is_stderr ? &stderr_data : &stdout_data);
     int fd = (is_stderr ? STDERR_FILENO : STDOUT_FILENO);
     void *senddata;
-    int sendlen, ret, fl;
+    int sendlen, ret;
 
     if (bufchain_size(chain) > 0) {
-        fl = fcntl(fd, F_GETFL);
-        if (fl != -1 && !(fl & O_NONBLOCK))
-            fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+        int prev_nonblock = nonblock(fd);
         do {
             bufchain_prefix(chain, &senddata, &sendlen);
             ret = write(fd, senddata, sendlen);
             if (ret > 0)
                 bufchain_consume(chain, ret);
         } while (ret == sendlen && bufchain_size(chain) != 0);
-        if (fl != -1 && !(fl & O_NONBLOCK))
-            fcntl(fd, F_SETFL, fl);
+        if (!prev_nonblock)
+            no_nonblock(fd);
         if (ret < 0 && errno != EAGAIN) {
             perror(is_stderr ? "stderr: write" : "stdout: write");
             exit(1);
@@ -599,7 +607,8 @@ int main(int argc, char **argv)
     int errors;
     int use_subsystem = 0;
     int got_host = FALSE;
-    long now;
+    unsigned long now;
+    struct winsize size;
 
     fdlist = NULL;
     fdcount = fdsize = 0;
@@ -659,8 +668,11 @@ int main(int argc, char **argv)
 	    } else if (!strcmp(p, "-s")) {
                 /* Save status to write to conf later. */
 		use_subsystem = 1;
-	    } else if (!strcmp(p, "-V")) {
+	    } else if (!strcmp(p, "-V") || !strcmp(p, "--version")) {
                 version();
+	    } else if (!strcmp(p, "--help")) {
+                usage();
+                exit(0);
             } else if (!strcmp(p, "-pgpfp")) {
                 pgp_fingerprints();
                 exit(1);
@@ -902,6 +914,15 @@ int main(int argc, char **argv)
     }
     putty_signal(SIGWINCH, sigwinch);
 
+    /*
+     * Now that we've got the SIGWINCH handler installed, try to find
+     * out the initial terminal size.
+     */
+    if (ioctl(STDIN_FILENO, TIOCGWINSZ, &size) >= 0) {
+	conf_set_int(conf, CONF_width, size.ws_col);
+	conf_set_int(conf, CONF_height, size.ws_row);
+    }
+
     sk_init();
     uxsel_init();
 
@@ -1012,12 +1033,17 @@ int main(int argc, char **argv)
 	}
 
 	do {
-	    long next, ticks;
+	    unsigned long next, then;
+	    long ticks;
 	    struct timeval tv, *ptv;
 
 	    if (run_timers(now, &next)) {
-		ticks = next - GETTICKCOUNT();
-		if (ticks < 0) ticks = 0;   /* just in case */
+		then = now;
+		now = GETTICKCOUNT();
+		if (now - then > next - then)
+		    ticks = 0;
+		else
+		    ticks = next - now;
 		tv.tv_sec = ticks / 1000;
 		tv.tv_usec = ticks % 1000 * 1000;
 		ptv = &tv;
@@ -1027,27 +1053,8 @@ int main(int argc, char **argv)
 	    ret = select(maxfd, &rset, &wset, &xset, ptv);
 	    if (ret == 0)
 		now = next;
-	    else {
-		long newnow = GETTICKCOUNT();
-		/*
-		 * Check to see whether the system clock has
-		 * changed massively during the select.
-		 */
-		if (newnow - now < 0 || newnow - now > next - now) {
-		    /*
-		     * If so, look at the elapsed time in the
-		     * select and use it to compute a new
-		     * tickcount_offset.
-		     */
-		    long othernow = now + tv.tv_sec * 1000 + tv.tv_usec / 1000;
-		    /* So we'd like GETTICKCOUNT to have returned othernow,
-		     * but instead it return newnow. Hence ... */
-		    tickcount_offset += othernow - newnow;
-		    now = othernow;
-		} else {
-		    now = newnow;
-		}
-	    }
+	    else
+		now = GETTICKCOUNT();
 	} while (ret < 0 && errno == EINTR);
 
 	if (ret < 0) {
@@ -1076,7 +1083,7 @@ int main(int argc, char **argv)
 	    if (read(signalpipe[0], c, 1) <= 0)
 		/* ignore error */;
 	    /* ignore its value; it'll be `x' */
-	    if (ioctl(0, TIOCGWINSZ, (void *)&size) >= 0)
+	    if (ioctl(STDIN_FILENO, TIOCGWINSZ, (void *)&size) >= 0)
 		back->size(backhandle, size.ws_col, size.ws_row);
 	}
 

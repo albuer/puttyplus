@@ -68,6 +68,16 @@ Filename *filename_deserialise(void *vdata, int maxsize, int *used)
     return filename_from_str(data);
 }
 
+#ifndef NO_SECUREZEROMEMORY
+/*
+ * Windows implementation of smemclr (see misc.c) using SecureZeroMemory.
+ */
+void smemclr(void *b, size_t n) {
+    if (b && n > 0)
+        SecureZeroMemory(b, n);
+}
+#endif
+
 char *get_username(void)
 {
     DWORD namelen;
@@ -161,6 +171,69 @@ HMODULE load_system32_dll(const char *libname)
     ret = LoadLibrary(fullpath);
     sfree(fullpath);
     return ret;
+}
+
+/*
+ * A tree234 containing mappings from system error codes to strings.
+ */
+
+struct errstring {
+    int error;
+    char *text;
+};
+
+static int errstring_find(void *av, void *bv)
+{
+    int *a = (int *)av;
+    struct errstring *b = (struct errstring *)bv;
+    if (*a < b->error)
+        return -1;
+    if (*a > b->error)
+        return +1;
+    return 0;
+}
+static int errstring_compare(void *av, void *bv)
+{
+    struct errstring *a = (struct errstring *)av;
+    return errstring_find(&a->error, bv);
+}
+
+static tree234 *errstrings = NULL;
+
+const char *win_strerror(int error)
+{
+    struct errstring *es;
+
+    if (!errstrings)
+        errstrings = newtree234(errstring_compare);
+
+    es = find234(errstrings, &error, errstring_find);
+
+    if (!es) {
+        int bufsize;
+
+        es = snew(struct errstring);
+        es->error = error;
+        /* maximum size for FormatMessage is 64K */
+        bufsize = 65535;
+        es->text = snewn(bufsize, char);
+        if (!FormatMessage((FORMAT_MESSAGE_FROM_SYSTEM |
+                            FORMAT_MESSAGE_IGNORE_INSERTS), NULL, error,
+                           MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                           es->text, bufsize, NULL)) {
+            sprintf(es->text,
+                    "Windows error code %d (and FormatMessage returned %d)", 
+                    error, GetLastError());
+        } else {
+            int len = strlen(es->text);
+            if (len > 0 && es->text[len-1] == '\n')
+                es->text[len-1] = '\0';
+        }
+        es->text = sresize(es->text, strlen(es->text) + 1, char);
+        add234(errstrings, es);
+    }
+
+    return es->text;
 }
 
 #ifdef DEBUG

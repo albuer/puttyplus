@@ -277,13 +277,22 @@ static int plug_proxy_accepting (Plug p, OSSocket sock)
  * This function can accept a NULL pointer as `addr', in which case
  * it will only check the host name.
  */
-static int proxy_for_destination (SockAddr addr, char *hostname, int port,
-				  Conf *conf)
+static int proxy_for_destination (SockAddr addr, const char *hostname,
+                                  int port, Conf *conf)
 {
     int s = 0, e = 0;
     char hostip[64];
     int hostip_len, hostname_len;
     const char *exclude_list;
+
+    /*
+     * Special local connections such as Unix-domain sockets
+     * unconditionally cannot be proxied, even in proxy-localhost
+     * mode. There just isn't any way to ask any known proxy type for
+     * them.
+     */
+    if (addr && sk_address_is_special_local(addr))
+        return 0;                      /* do not proxy */
 
     /*
      * Check the host name and IP against the hard-coded
@@ -464,6 +473,8 @@ Socket new_connection(SockAddr addr, char *hostname,
 				   conf_get_int(conf, CONF_addressfamily));
 	if (sk_addr_error(proxy_addr) != NULL) {
 	    ret->error = "Proxy error: Unable to resolve proxy host name";
+            sfree(pplug);
+            sk_addr_free(proxy_addr);
 	    return (Socket)ret;
 	}
 	sfree(proxy_canonical_name);
@@ -741,8 +752,7 @@ int proxy_socks4_negotiate (Proxy_Socket p, int change)
 
 	type = sk_addrtype(p->remote_addr);
 	if (type == ADDRTYPE_IPV6) {
-	    plug_closing(p->plug, "Proxy error: SOCKS version 4 does"
-			 " not support IPv6", PROXY_ERROR_GENERAL, 0);
+            p->error = "Proxy error: SOCKS version 4 does not support IPv6";
 	    return 1;
 	} else if (type == ADDRTYPE_IPV4) {
 	    namelen = 0;
