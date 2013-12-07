@@ -3298,8 +3298,10 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 		} else {
 		    /* trigger a scroll */
 		    term_scroll(term, 0,
-				b == MBT_WHEEL_UP ?
-				-term->rows / 2 : term->rows / 2);
+              b == MBT_WHEEL_UP ?
+              -3:3);
+//              b == MBT_WHEEL_UP ?
+//              -term->rows / 2 : term->rows / 2);
 		}
 	    }
 	    return 0;
