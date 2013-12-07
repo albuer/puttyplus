@@ -309,7 +309,7 @@ static void close_session(void)
     int i;
 
     session_closed = TRUE;
-    sprintf(morestuff, "%.70s (inactive)", appname);
+    sprintf(morestuff, "%.70s (inactive)", get_window_title(NULL, 0));
     set_icon(NULL, morestuff);
     set_title(NULL, morestuff);
 
