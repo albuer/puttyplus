@@ -215,6 +215,36 @@ static int find_child_process(DWORD dwProcessId, process_handle handle)
     return count;
 }
 
+static int check_newline(char* data, int len)
+{
+    int len_o=len;
+    while(len>0) {
+         if((*data==0x0a) && (len_o==len || (*(data-1)!=0x0d)))
+            return 1;
+         ++data;
+         --len;
+    }
+    return 0;
+}
+
+static int revise_newline(char* buff, char* data, int len)
+{
+    int buff_len = 0;
+    int len_o=len;
+    while(len>0)
+    {
+        if((*data==0x0a) && (len_o==len || (*(data-1)!=0x0d)))
+        {
+            *buff++ = 0x0d;
+			++buff_len;
+        }
+        *buff++ = *data++;
+        ++buff_len;
+        --len;
+    }
+    return buff_len;
+}
+
 static void console_terminate(Console console)
 {
     // 关闭子进程及该子进程创建的所有进程
@@ -273,8 +303,16 @@ static int console_gotdata(struct handle *h, void *data, int len)
 			cmdh_init();
             need_echo = no_child;
         }
-        
-        from_backend(console->frontend, 0, data, len);
+
+        if (check_newline(data, len))
+        {
+            char buff[BUFSIZE*2];
+            int buff_len = revise_newline(buff, data, len);
+            from_backend(console->frontend, 0, buff, buff_len);
+        }
+        else
+            from_backend(console->frontend, 0, data, len);
+
         if(need_echo)
             from_backend_pos(console->frontend, &left_limit_x, &left_limit_y);
         return 0;
@@ -434,8 +472,7 @@ static int console_send(void *handle, char *buf, int len)
     {
         if(buf[len-1] == '\r')
         {
-            buf[len] = '\n';
-            buf[++len] = 0;
+            buf[len-1] = '\n';
         }
 
         console->bufsize = handle_write(console->out, buf, len);
