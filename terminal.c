@@ -6632,3 +6632,14 @@ void term_get_last_pos(Terminal *term, int* x, int* y)
     *x = term->curs.x;
 }
 
+void term_get_pos(pos* pa, pos* pb, int increase)//(int x, int y, int* newx, int* newy, int increase)
+{
+    pb->x = (pa->x+increase)%term->cols;
+    pb->y = pa->y+(pa->x+increase)/term->cols;
+}
+
+int term_get_cols()
+{
+    return term->cols;
+}
+

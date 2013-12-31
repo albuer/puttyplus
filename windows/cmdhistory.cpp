@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+int left_limit_x, left_limit_y;
+int right_limit_x, right_limit_y;
+
 #define MAX_CMD_LENGTH  8192
 static CLinkedList cmdlst;
 static int cmd_exec_flag;
@@ -129,8 +132,21 @@ static int key_translate(const char *key, int len)
     return result;
 }
 
-extern "C" int left_limit_x, left_limit_y;
-extern "C" int right_limit_x, right_limit_y;
+//extern "C" int left_limit_x, left_limit_y;
+//extern "C" int right_limit_x, right_limit_y;
+
+static int insert_backspace(char* buf, int count)
+{
+    int i=0;
+    char tmp_buf[MAX_CMD_LENGTH];
+    strcpy(tmp_buf, buf);
+    memset(buf,0,MAX_CMD_LENGTH);
+    for(i=0; i<count; i++)
+        buf[i] = '\x08';
+    buf[i] = '\0';
+    strcat(buf, tmp_buf);
+    return 0;
+}
 
 void cmd_add_char(const char *buf, int len, const char**show, const char**send)
 {
@@ -145,16 +161,26 @@ void cmd_add_char(const char *buf, int len, const char**show, const char**send)
     {
     case CMD_KEY_UP:
     case CMD_KEY_DOWN:
+/*
         *show = cmdh_get( (key_s==CMD_KEY_UP)?1:0 );
         if(*show)
         {
+            int bs_count = strlen(cmd_buf);
             cmd_buf[0] = 0;
             strcat(cmd_buf, *show);
+            if (bs_count)
+                insert_backspace((char*)*show, bs_count);
         }
+*/
         break;
-    case CMD_KEY_LEFT:
     case CMD_KEY_BACKSPACE:
-        if( right_limit_y>=left_limit_y && right_limit_x>left_limit_x)
+        cmd_buf[strlen(cmd_buf)-1] = '\0';
+    case CMD_KEY_LEFT:
+        if (right_limit_y>=left_limit_y && right_limit_x>left_limit_x)
+            *show = buf;
+        break;
+    case CMD_KEY_RIGHT:
+        if (right_limit_y>=left_limit_y && right_limit_x>left_limit_x)
             *show = buf;
         break;
     case CMD_KEY_NORMAL:

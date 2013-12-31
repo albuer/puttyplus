@@ -10,9 +10,15 @@
 
 #include "putty.h"
 #include "cmdhistory.h"
+#include "terminal.h"
 
-int left_limit_x, left_limit_y;
-int right_limit_x, right_limit_y;
+#define poslt(p1,p2) ( (p1).y < (p2).y || ( (p1).y == (p2).y && (p1).x < (p2).x ) )
+#define posle(p1,p2) ( (p1).y < (p2).y || ( (p1).y == (p2).y && (p1).x <= (p2).x ) )
+#define poseq(p1,p2) ( (p1).y == (p2).y && (p1).x == (p2).x )
+
+static void console_presend(void *handle, char *buf, int len);
+
+static pos cursor_pos, left_limit_pos, right_limit_pos;
 
 typedef struct console_backend_data {
     HANDLE hClientRead, hClientWrite, hServerWrite, hServerRead;
@@ -31,7 +37,7 @@ typedef struct{
 } CREATE_PIPE;
 
 static const char* base_title = "PuTTY Plus Console";
-static int need_echo = 1;
+static int win_console = 1;
 
 #define BUFSIZE 2048
 #define BASE_PIPENAME "\\\\.\\pipe\\puttyplus"
@@ -215,7 +221,7 @@ static int find_child_process(DWORD dwProcessId, process_handle handle)
     return count;
 }
 
-static int check_newline(char* data, int len)
+static int is_only_newline(char* data, int len)
 {
     int len_o=len;
     while(len>0) {
@@ -227,6 +233,7 @@ static int check_newline(char* data, int len)
     return 0;
 }
 
+// 确保一行字符串是以回车或者回车换行符来结束。
 static int revise_newline(char* buff, char* data, int len)
 {
     int buff_len = 0;
@@ -272,9 +279,11 @@ static void console_terminate(Console console)
     // clear cmd history list
 }
 
+// 当对端有数据输出时，调用该函数来处理
 static int console_gotdata(struct handle *h, void *data, int len)
 {
     Console console = (Console)handle_get_privdata(h);
+    logevent(console->frontend, "console_gotdata");
     if (len <= 0) {
         const char *error_msg;
     	/*
@@ -297,14 +306,14 @@ static int console_gotdata(struct handle *h, void *data, int len)
     } else {
         // need echo if no child process
         BOOL no_child = (find_child_process(console->dwProcessId, process_has_childs)==0);
-        if( no_child != need_echo )
+        if( no_child != win_console )
         {
 			// clean cmd buffer
 			cmdh_init();
-            need_echo = no_child;
+            win_console = no_child;
         }
 
-        if (check_newline(data, len))
+        if (is_only_newline(data, len))
         {
             char buff[BUFSIZE*2];
             int buff_len = revise_newline(buff, data, len);
@@ -313,8 +322,11 @@ static int console_gotdata(struct handle *h, void *data, int len)
         else
             from_backend(console->frontend, 0, data, len);
 
-        if(need_echo)
-            from_backend_pos(console->frontend, &left_limit_x, &left_limit_y);
+        if(win_console){
+            from_backend_pos(console->frontend, &left_limit_pos.x, &left_limit_pos.y);
+            cursor_pos.x = left_limit_pos.x;
+            cursor_pos.y = left_limit_pos.y;
+        }
         return 0;
     }
 }
@@ -322,6 +334,7 @@ static int console_gotdata(struct handle *h, void *data, int len)
 static void console_sentdata(struct handle *h, int new_backlog)
 {
     Console console = (Console)handle_get_privdata(h);
+    logevent(console->frontend, "console_sentdata");
     if (new_backlog < 0) {
         const char *error_msg = "Error writing to console device";
         console_terminate(console);
@@ -387,12 +400,12 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
     prgm = conf_get_str(conf, CONF_consoleprgm);
     
 	strcat( shellCmd, (" /A") );
-    need_echo = 1;
+    win_console = 1;
 	if( prgm[0] )
 	{
 		strcat(shellCmd, " /C ");
         strcat(shellCmd, prgm);
-        need_echo = 0;
+        win_console = 0;
 	}
 
     {
@@ -445,16 +458,25 @@ static void console_reconfig(void *handle, Conf *conf)
 /*
  * Called to send data down the console connection.
  */
+// 在主界面上输入的字符，将被送到此处
 static int console_send(void *handle, char *buf, int len)
 {
     Console console = (Console) handle;
     int ret = 0;
+    logevent(console->frontend, "console_send");
 
     if (console->out == NULL)
     	return 0;
 
-    if (need_echo)
+// 对于类Linux的console，在把字符送给它们时，它们会把该字符回显，
+// 从而在console_gotdata我们可以得到该字符并自动送到前端显示。
+// 对于windows console，送给它们的字符并不会回显，也就不会回调console_gotdata函数，
+// 因此我们需要手动回显(把字符送给前端显示)
+    if (win_console)
     {
+#if 1
+        console->bufsize = winconso_send(handle, buf, len);
+#else
         const char *show = NULL;
         const char *send = NULL;
         buf[len] = '\0';
@@ -467,6 +489,7 @@ static int console_send(void *handle, char *buf, int len)
         }
         if(send)
             console->bufsize = handle_write(console->out, send, strlen(send));
+#endif
     }
     else
     {
@@ -487,6 +510,7 @@ static int console_send(void *handle, char *buf, int len)
 static int console_sendbuffer(void *handle)
 {
     Console console = (Console) handle;
+    logevent(console->frontend, "console_sendbuffer");
     return console->bufsize;
 }
 
@@ -496,6 +520,8 @@ static int console_sendbuffer(void *handle)
 static void console_size(void *handle, int width, int height)
 {
     /* Do nothing! */
+    Console console = (Console) handle;
+    logevent(console->frontend, "console_size");
     return;
 }
 
@@ -518,6 +544,10 @@ static const struct telnet_special *console_get_specials(void *handle)
     static const struct telnet_special specials[] = {
 	{NULL, TS_EXITMENU}
     };
+
+    Console console = (Console) handle;
+    logevent(console->frontend, "console_get_specials");
+
     return specials;
 }
 
@@ -608,3 +638,242 @@ Backend console_backend = {
     PROT_CONSOLE,
     0
 };
+
+#if 0
+
+static int new_cmd_buf;
+
+static void cmd_add_char(const char *buf, int len)
+{
+    int key_s = 0;
+    if(new_cmd_buf)
+    {
+        cmd_buf[0] = 0;
+        new_cmd_buf = 0;
+    }
+    
+    strncat(cmd_buf, buf, len);
+    
+    if( buf[0] == '\r' )
+    {
+        // 将执行的命令加入命令历史记录
+        cmd_buf[strlen(cmd_buf)-1] = '\0';
+        cmdh_add(cmd_buf);
+
+        strcat(cmd_buf, "\r\n");
+
+        new_cmd_buf = 1;
+    }
+}
+
+// 在把数据送给backend之前，先对待发送数据进行处理
+// 如果是类unix的console，可直接返回
+// 如果是windows console，则需要处理
+static void console_presend(void *handle, char *buf, int len)
+{
+    Console console = (Console) handle;
+    int key_s = 0;
+    char* to_backend = NULL;
+    int to_backend_len = 0;
+    char* to_frontend = NULL;
+    int to_frontend_len = 0;
+
+    switch( key_s=key_translate(buf, len) )
+    {
+    case CTRL_KEY_UP:
+    case CTRL_KEY_DOWN:
+        break;
+    case CTRL_KEY_LEFT:
+        break;
+    case CTRL_KEY_BACKSPACE:
+        to_frontend = "\x08\x1b\x5b\x4b";
+        to_frontend_len = 4;
+        console_gotdata(console->in, to_frontend, to_frontend_len);
+        to_backend = "\x08";
+        to_backend_len = 1;
+        handle_write(console->out, to_backend, to_backend_len);
+        break;
+    case CTRL_KEY_INVALID:
+    default:
+        if(buf[len-1] == '\r')
+        {
+            buf[len-1] = '\n';
+        }
+        console_gotdata(console->in, buf, len);
+        handle_write(console->out, buf, len);
+        break;
+    }
+
+//    if (key_s==CTRL_KEY_INVALID)
+//       console->bufsize = handle_write(console->out, buf, len);
+
+//    console_gotdata(console->in, to_frontend, to_frontend_len);
+}
+#endif
+
+#define MAX_CMD_LENGTH  8192
+static char cmd_buff[MAX_CMD_LENGTH] = "";
+
+enum{
+    CTRL_KEY_NOT = 0,
+    CTRL_KEY_UP,
+    CTRL_KEY_DOWN,
+    CTRL_KEY_RIGHT,
+    CTRL_KEY_LEFT,
+    CTRL_KEY_HOME,
+    CTRL_KEY_END,
+    CTRL_KEY_DELETE,
+    CTRL_KEY_BACKSPACE,
+};
+
+static int key_translate(const char *key, int len)
+{
+    int result = CTRL_KEY_NOT;
+    
+    if( !strncmp("\x1B[A", key, len) )
+    {// UP
+        result = CTRL_KEY_UP;
+    }
+    else if( !strncmp("\x1B[B", key, len) )
+    {// DOWN
+        result = CTRL_KEY_DOWN;
+    }
+    else if( !strncmp("\x1B[C", key, len) )
+    {// RIGHT
+        result = CTRL_KEY_RIGHT;
+    }
+    else if( !strncmp("\x1B[D", key, len) )
+    {// LEFT
+        result = CTRL_KEY_LEFT;
+    }
+    else if( !strncmp("\x1B[1~", key, len) )
+    {// HOME
+        result = CTRL_KEY_HOME;
+    }
+    else if( !strncmp("\x1B[4~", key, len) )
+    {// END
+        result = CTRL_KEY_END;
+    }
+    else if( !strncmp("\x1B[3~", key, len) )
+    {// DELETE
+        result = CTRL_KEY_DELETE;
+    }
+    else if( !strncmp("\x7F", key, len) )
+    {// BACKSPACE
+        result = CTRL_KEY_BACKSPACE;
+    }
+    
+    return result;
+}
+
+// 返回值:  送入后端的字符个数
+static int winconso_send(void *handle, char *buf, int len)
+{
+    Console console = (Console) handle;
+    int is_cmd_comp = 0;
+    char to_frontend[MAX_CMD_LENGTH] = "";
+
+    if (cmd_buff[0]=='\0') {
+    }
+
+    switch (key_translate(buf, len))
+    {
+    case CTRL_KEY_UP:
+    case CTRL_KEY_DOWN:
+        break;
+    case CTRL_KEY_LEFT:
+        if (posle(cursor_pos, left_limit_pos))
+            sprintf(to_frontend, "\x07"); // bell
+        else if(cursor_pos.x==0) // 到上一行
+        {
+            int i=0;
+            sprintf(to_frontend, "\x1B[A"); // up
+            for(i=0;i<(term_get_cols()-1);i++)
+            {
+                strcat(to_frontend, "\x1B[C"); // right
+            }
+        }
+        else
+            sprintf(to_frontend, "\x08");
+        break;
+    case CTRL_KEY_RIGHT:
+        term_get_pos(&left_limit_pos, &right_limit_pos, strlen(cmd_buff));
+        if (posle(right_limit_pos, cursor_pos))
+            sprintf(to_frontend, "\x07"); // bell
+        else if (cursor_pos.x == (term_get_cols()-1))
+        {
+            int i=0;
+            sprintf(to_frontend, "\x1B[B"); // down
+            for(i=0;i<(term_get_cols()-1);i++)
+            {
+                strcat(to_frontend, "\x08"); // left
+            }
+        }
+        else
+            sprintf(to_frontend, "\x1B[C");
+        break;
+    case CTRL_KEY_HOME:
+        if (poseq(cursor_pos, left_limit_pos))
+            sprintf(to_frontend, "\x07"); // bell
+        else
+        {
+            int i=0;
+            for(i=0; i<(cursor_pos.y-left_limit_pos.y); i++)
+            {
+                strcat(to_frontend, "\x1B[A"); // up
+            }
+            strcat(to_frontend, "\x0D"); // return
+            for (i=0; i<left_limit_pos.x; i++)
+            {
+                strcat(to_frontend, "\x1B[C"); // right
+            }
+        }
+        break;
+    case CTRL_KEY_END:
+        term_get_pos(&left_limit_pos, &right_limit_pos, strlen(cmd_buff));
+        if (poseq(cursor_pos, right_limit_pos))
+            sprintf(to_frontend, "\x07"); // bell
+        else
+        {
+            int i=0;
+            for(i=0; i<(right_limit_pos.y-cursor_pos.y); i++)
+            {
+                strcat(to_frontend, "\x1B[B"); // down
+            }
+            strcat(to_frontend, "\x0D"); // return
+            for (i=0; i<right_limit_pos.x; i++)
+            {
+                strcat(to_frontend, "\x1B[C"); // right
+            }
+        }
+        break;
+    case CTRL_KEY_DELETE:
+        break;
+    case CTRL_KEY_BACKSPACE:
+        break;
+    case CTRL_KEY_NOT:
+    default:
+        if(buf[len-1] == '\r')
+        {
+            buf[len-1] = '\n';
+            is_cmd_comp = 1;
+        }
+        // 保存字符到命令行buff
+        strncat(cmd_buff, buf, len);
+        if (is_cmd_comp) {
+            handle_write(console->out, cmd_buff, strlen(cmd_buff));
+            cmd_buff[0] = '\0';
+        } else {
+            strncpy(to_frontend, buf, len);
+        }
+        break;
+    }
+
+    if (to_frontend[0] != 0) {
+        from_backend(console->frontend, 0, to_frontend, strlen(to_frontend));
+        from_backend_pos(console->frontend, &cursor_pos.x, &cursor_pos.y);
+    }
+
+    return 0;
+}
+
