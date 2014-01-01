@@ -6628,11 +6628,11 @@ int term_get_userpass_input(Terminal *term, prompts_t *p,
 
 void term_get_last_pos(Terminal *term, int* x, int* y)
 {
-    *y = term->curs.y+(-sblines(term));
+    *y = term->curs.y+(sblines(term));
     *x = term->curs.x;
 }
 
-void term_get_pos(pos* pa, pos* pb, int increase)//(int x, int y, int* newx, int* newy, int increase)
+void term_get_pos(pos* pa, pos* pb, int increase)
 {
     pb->x = (pa->x+increase)%term->cols;
     pb->y = pa->y+(pa->x+increase)/term->cols;
@@ -6641,5 +6641,10 @@ void term_get_pos(pos* pa, pos* pb, int increase)//(int x, int y, int* newx, int
 int term_get_cols()
 {
     return term->cols;
+}
+
+int term_posdiff(pos *p1, pos *p2)
+{
+    return (p1->y - p2->y) * term->cols + (p1->x - p2->x);
 }
 

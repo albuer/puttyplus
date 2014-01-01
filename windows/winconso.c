@@ -309,7 +309,7 @@ static int console_gotdata(struct handle *h, void *data, int len)
         if( no_child != win_console )
         {
 			// clean cmd buffer
-			cmdh_init();
+//			cmdh_init();
             win_console = no_child;
         }
 
@@ -319,8 +319,14 @@ static int console_gotdata(struct handle *h, void *data, int len)
             int buff_len = revise_newline(buff, data, len);
             from_backend(console->frontend, 0, buff, buff_len);
         }
-        else
+        else {
+            char* p = (char*)data;
+            if(win_console && p[len-1]=='>'){
+                p[len++]=' ';
+                p[len]='\0';
+            }
             from_backend(console->frontend, 0, data, len);
+        }
 
         if(win_console){
             from_backend_pos(console->frontend, &left_limit_pos.x, &left_limit_pos.y);
@@ -724,6 +730,7 @@ enum{
     CTRL_KEY_END,
     CTRL_KEY_DELETE,
     CTRL_KEY_BACKSPACE,
+    CTRL_KEY_BREAK,
 };
 
 static int key_translate(const char *key, int len)
@@ -762,8 +769,59 @@ static int key_translate(const char *key, int len)
     {// BACKSPACE
         result = CTRL_KEY_BACKSPACE;
     }
+    else if( !strncmp("\x03", key, len) )
+    {// Break
+        result = CTRL_KEY_BREAK;
+    }
     
     return result;
+}
+
+static void go_home(char* to_frontend)
+{
+    int i=0;
+    for(i=0; i<(cursor_pos.y-left_limit_pos.y); i++)
+    {
+        strcat(to_frontend, "\x1B[A"); // up
+    }
+    strcat(to_frontend, "\x0D"); // return
+    for (i=0; i<left_limit_pos.x; i++)
+    {
+        strcat(to_frontend, "\x1B[C"); // right
+    }
+}
+
+static void clean_line(char* to_frontend)
+{
+    int i=0;
+    char deletes_str[10];
+
+    go_home(to_frontend);
+
+    sprintf(deletes_str, "\x1B[%dP", term_get_cols() - left_limit_pos.x);
+    strcat(to_frontend, deletes_str);
+    for(i=(right_limit_pos.y-left_limit_pos.y); i>0; i--)
+    {
+        strcat(to_frontend,"\r\n");
+        if(i==1)
+        {
+            sprintf(deletes_str, "\x1B[%dP", right_limit_pos.x);
+        }
+        else
+            sprintf(deletes_str, "\x1B[%dP", term_get_cols());
+        strcat(to_frontend, deletes_str);
+        strcat(to_frontend, "\x1B[K");
+    }
+
+    for(i=0; i<(right_limit_pos.y-left_limit_pos.y); i++)
+    {
+        strcat(to_frontend, "\x1B[A"); // up
+    }
+    strcat(to_frontend, "\x0D"); // return
+    for (i=0; i<left_limit_pos.x; i++)
+    {
+        strcat(to_frontend, "\x1B[C"); // right
+    }
 }
 
 // 返回值:  送入后端的字符个数
@@ -776,10 +834,29 @@ static int winconso_send(void *handle, char *buf, int len)
     if (cmd_buff[0]=='\0') {
     }
 
+    term_get_pos(&left_limit_pos, &right_limit_pos, strlen(cmd_buff));
+
     switch (key_translate(buf, len))
     {
     case CTRL_KEY_UP:
+        {
+            char* pcmd = cmdh_get(1);
+            if(pcmd) {
+                clean_line(to_frontend);
+                strcat(to_frontend, pcmd);
+                sprintf(cmd_buff, "%s", pcmd);
+            }
+        }
+        break;
     case CTRL_KEY_DOWN:
+        {
+            char* pcmd = cmdh_get(0);
+            if(pcmd) {
+                clean_line(to_frontend);
+                strcat(to_frontend, pcmd);
+                sprintf(cmd_buff, "%s", pcmd);
+            }
+        }
         break;
     case CTRL_KEY_LEFT:
         if (posle(cursor_pos, left_limit_pos))
@@ -797,7 +874,6 @@ static int winconso_send(void *handle, char *buf, int len)
             sprintf(to_frontend, "\x08");
         break;
     case CTRL_KEY_RIGHT:
-        term_get_pos(&left_limit_pos, &right_limit_pos, strlen(cmd_buff));
         if (posle(right_limit_pos, cursor_pos))
             sprintf(to_frontend, "\x07"); // bell
         else if (cursor_pos.x == (term_get_cols()-1))
@@ -830,7 +906,6 @@ static int winconso_send(void *handle, char *buf, int len)
         }
         break;
     case CTRL_KEY_END:
-        term_get_pos(&left_limit_pos, &right_limit_pos, strlen(cmd_buff));
         if (poseq(cursor_pos, right_limit_pos))
             sprintf(to_frontend, "\x07"); // bell
         else
@@ -847,24 +922,109 @@ static int winconso_send(void *handle, char *buf, int len)
             }
         }
         break;
-    case CTRL_KEY_DELETE:
-        break;
     case CTRL_KEY_BACKSPACE:
+        if (posle(cursor_pos, left_limit_pos)){
+            sprintf(to_frontend, "\x07"); // bell
+            break;
+        } else {
+            int i=0;
+            char* p = cmd_buff+term_posdiff(&cursor_pos, &left_limit_pos)-1;
+            char* p2 = p;
+            sprintf(to_frontend, "\x08"); // left
+            while(*p){
+                *p = *(p+1);
+                ++p;
+            }
+            p = p2;
+            strcat(to_frontend, p);
+
+            if (right_limit_pos.x==1) //删除一个字符后将会空出一行
+            {
+                if(cursor_pos.y!=right_limit_pos.y)
+                    strcat(to_frontend, "\r\n"); // 
+                strcat(to_frontend, "\x1B[K"); // break
+            } 
+            else if (poseq(cursor_pos, right_limit_pos))
+                strcat(to_frontend, "\x1B[K"); // break
+            else
+                strcat(to_frontend, "\x1B[1P"); // delete
+            for(i=0; i<strlen(p); i++)
+                strcat(to_frontend, "\x08"); // left
+        }
+        break;
+    case CTRL_KEY_DELETE:
+        if (poseq(cursor_pos, right_limit_pos))
+            sprintf(to_frontend, "\x07"); // bell
+        else
+        {
+            int i=0;
+            char* p = cmd_buff+term_posdiff(&cursor_pos, &left_limit_pos);
+            char* p2 = p;
+            while(*p){
+                *p = *(p+1);
+                ++p;
+            }
+            p = p2;
+            strcat(to_frontend, p);
+            
+            if (right_limit_pos.x==1) //删除一个字符后将会空出一行
+            {
+                strcat(to_frontend, "\r\n"); //
+                strcat(to_frontend, "\x1B[K"); // break
+            } 
+            else
+                strcat(to_frontend, "\x1B[1P"); // delete
+            for(i=0; i<strlen(p); i++)
+                strcat(to_frontend, "\x08"); // left
+        }
+        break;
+    case CTRL_KEY_BREAK:
+        handle_write(console->out, "\r\n", 2);
+        cmd_buff[0] = '\0';
+
+        sprintf(to_frontend, "^C");
         break;
     case CTRL_KEY_NOT:
     default:
         if(buf[len-1] == '\r')
         {
-            buf[len-1] = '\n';
-            is_cmd_comp = 1;
-        }
-        // 保存字符到命令行buff
-        strncat(cmd_buff, buf, len);
-        if (is_cmd_comp) {
-            handle_write(console->out, cmd_buff, strlen(cmd_buff));
-            cmd_buff[0] = '\0';
+            {// 送前端显示，相当于按HOME键
+                int i=0;
+                for(i=0; i<(cursor_pos.y-left_limit_pos.y); i++)
+                {
+                    strcat(to_frontend, "\x1B[A"); // up
+                }
+                strcat(to_frontend, "\x0D"); // return
+                for (i=0; i<left_limit_pos.x; i++)
+                {
+                    strcat(to_frontend, "\x1B[C"); // right
+                }
+            }
+            {
+                cmdh_add(cmd_buff);
+                handle_write(console->out, cmd_buff, strlen(cmd_buff));
+                handle_write(console->out, "\r\n", 2);
+                cmd_buff[0] = '\0';
+            }
         } else {
-            strncpy(to_frontend, buf, len);
+            if (!poseq(cursor_pos, right_limit_pos))
+            {
+                int i=0;
+                char* p = cmd_buff+term_posdiff(&cursor_pos, &left_limit_pos);
+                char* newp = cmd_buff+strlen(cmd_buff)-1;
+                while(p<=newp) {
+                    *(newp+len) = *newp;
+                    --newp;
+                }
+                memcpy(p, buf, len);
+                strcpy(to_frontend, p);
+                for(i=0;i<(strlen(p)-len);i++)
+                    strcat(to_frontend, "\x08");
+            }
+            else {
+                strncpy(to_frontend, buf, len);
+                strncat(cmd_buff, buf, len);
+            }
         }
         break;
     }
