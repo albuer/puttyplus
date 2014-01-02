@@ -16,6 +16,8 @@
 #include "dialog.h"
 #include "storage.h"
 
+void ser_com_list_handler(union control *ctrl, void *dlg, void *data, int event);
+
 static void serial_parity_handler(union control *ctrl, void *dlg,
 				  void *data, int event)
 {
@@ -181,9 +183,10 @@ void ser_setup_config_box(struct controlbox *b, int midsession,
 	 */
 	s = ctrl_getset(b, "Connection/Serial", "serline",
 			"Select a serial line");
-	ctrl_editbox(s, "Serial line to connect to", 'l', 40,
-		     HELPCTX(serial_line),
-		     conf_editbox_handler, I(CONF_serline), I(1));
+    
+    ctrl_combobox(s, "Serial line to connect to", 'l', 40,
+             HELPCTX(serial_line),
+             ser_com_list_handler, P(NULL), P(NULL));
     }
 
     s = ctrl_getset(b, "Connection/Serial", "sercfg", "Configure the serial line");
@@ -206,3 +209,103 @@ void ser_setup_config_box(struct controlbox *b, int midsession,
 		  HELPCTX(serial_flow),
 		  serial_flow_handler, I(flow_mask));
 }
+
+#include <windows.h>
+#pragma warning(push)
+#pragma warning(disable:4201)
+#include <SetupAPI.h>
+#include <devguid.h>
+#pragma warning(pop)
+#include <stdio.h>
+
+#define MAX_COM 16
+struct COM_LIST{
+	int count;
+	int com_id[MAX_COM];
+	char com_name[MAX_COM][256];
+	//int com[MAX_COM];
+};
+static struct COM_LIST com_list;
+
+int get_comm_list()
+{
+	int it;
+
+	unsigned int com_index=0;
+	
+	int now_sel=-1;//2013-03-04:表示更新前被选中的设备现已不存在,否则表示ComboBox索引
+	int new_sel=0;
+	
+	//SetupApi
+	HDEVINFO hDevInfo = INVALID_HANDLE_VALUE;
+	SP_DEVINFO_DATA spdata={0};
+
+	//遍历串口设备,通过SetupApi
+	com_list.count = 0;
+	hDevInfo = SetupDiGetClassDevs(&GUID_DEVCLASS_PORTS,0,0,DIGCF_PRESENT);
+	if(hDevInfo == INVALID_HANDLE_VALUE){
+		com_list.count = 0;
+		return 0;
+	}
+	spdata.cbSize = sizeof(spdata);
+	for(it=0; SetupDiEnumDeviceInfo(hDevInfo,it,&spdata); it++){
+		if(SetupDiGetDeviceRegistryProperty(hDevInfo,&spdata,SPDRP_FRIENDLYNAME,
+			NULL,(PBYTE)&com_list.com_name[com_index][0],sizeof(com_list.com_name[0]),NULL))
+		{
+			char* pch = NULL;
+			int tmp_id = 0;
+			//2013-03-09修复未检测并口的错误
+			pch = strstr(&com_list.com_name[com_index][0],"LPT");
+			if(pch) continue;//并口
+			pch = strstr(&com_list.com_name[com_index][0],"COM");
+			__try{
+				tmp_id = atoi(pch+3);
+				*(pch-1) = 0;
+			}
+			__except(EXCEPTION_EXECUTE_HANDLER){
+			}
+			com_list.com_id[com_index] = tmp_id;
+			com_index++;
+		}
+	}
+	SetupDiDestroyDeviceInfoList(hDevInfo);
+	com_list.count = com_index;
+
+	return com_list.count;
+}
+
+void ser_com_list_handler(union control *ctrl, void *dlg, void *data, int event)
+{
+    Conf *conf = (Conf *)data;
+    if (event == EVENT_REFRESH) {
+    	int i;
+    	char *comm;
+        char comm_name[256];
+
+    	dlg_update_start(ctrl, dlg);
+    	/*
+    	 * Some backends may wish to disable the drop-down list on
+    	 * this edit box. Be prepared for this.
+    	 */
+    	if (ctrl->editbox.has_list) {
+    	    dlg_listbox_clear(ctrl, dlg);
+            get_comm_list();
+    	    for (i = 0; i < com_list.count; i++){
+                sprintf(comm_name, "COM%d(%s)", com_list.com_id[i], com_list.com_name[i]);
+//                sprintf(comm_name, "COM%d", com_list.com_id[i]);
+        		dlg_listbox_add(ctrl, dlg, comm_name);
+            }
+        }
+    	comm = conf_get_str(conf, CONF_serline);
+    	if (!comm)
+    	    comm = "COM1";
+    	dlg_editbox_set(ctrl, dlg, comm);
+    	dlg_update_done(ctrl, dlg);
+    } else if (event == EVENT_VALCHANGE) {
+    	char *s = dlg_editbox_get(ctrl, dlg);
+	    conf_set_str(conf, CONF_serline, s);
+    	sfree(s);
+    }
+}
+
+

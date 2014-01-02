@@ -4181,6 +4181,21 @@ static int TranslateKey(UINT message, WPARAM wParam, LPARAM lParam,
             break;
         }
         if (hotkey) return -1;
+    } else if(shift_state == 0 && !left_alt) {
+        int hotkey = 0;
+        extern int term_find_select_text(int backward);
+        switch(wParam)
+        {
+        case VK_F4:
+            term_find_select_text(0);
+            hotkey = 1;
+            break;
+        case VK_F3:
+            term_find_select_text(1);
+            hotkey = 1;
+            break;
+        }
+        if (hotkey) return -1;
     }
 
 	/* Lets see if it's a pattern we know all about ... */

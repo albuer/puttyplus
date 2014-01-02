@@ -109,6 +109,7 @@ static void scroll(Terminal *, int, int, int, int);
 #ifdef OPTIMISE_SCROLL
 static void scroll_display(Terminal *, int, int, int);
 #endif /* OPTIMISE_SCROLL */
+static void get_select_chars(Terminal *term, pos top, pos bottom, int rect, int desel);
 
 static termline *newline(Terminal *term, int cols, int bce)
 {
@@ -5290,6 +5291,8 @@ typedef struct {
     int *attrptr;	    /* = attrbuf + bufpos */
 } clip_workbuf;
 
+static wchar_t* s_select_text = NULL;
+
 static void clip_addchar(clip_workbuf *b, wchar_t chr, int attr)
 {
     if (b->bufpos >= b->buflen) {
@@ -5463,6 +5466,12 @@ static void clipme(Terminal *term, pos top, pos bottom, int rect, int desel)
 #endif
     /* Finally, transfer all that to the clipboard. */
     write_clip(term->frontend, buf.textbuf, buf.attrbuf, buf.bufpos, desel);
+
+    if (s_select_text)
+        sfree(s_select_text);
+    s_select_text = snewn(buf.bufpos, wchar_t);
+    memcpy(s_select_text, buf.textbuf, buf.bufpos*sizeof(wchar_t));
+    
     sfree(buf.textbuf);
     sfree(buf.attrbuf);
 }
@@ -5729,6 +5738,14 @@ int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
     sfree(buf.posbuf);
 
     return is_find;
+}
+
+int term_find_select_text(int backward)
+{
+    if (!s_select_text) return 0;
+    term_find(term, s_select_text, backward, 0, 0);
+
+    return 0;
 }
 
 int term_find(Terminal *term, wchar_t* str_find, 
@@ -6281,8 +6298,12 @@ void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
 	    clipme(term, term->selstart, term->selend,
 		   (term->seltype == RECTANGULAR), FALSE);
 	    term->selstate = SELECTED;
-	} else
+	} else {
 	    term->selstate = NO_SELECTION;
+        if (s_select_text)
+            sfree(s_select_text);
+        s_select_text = NULL;
+	}
     } else if (bcooked == MBT_PASTE
 	       && (a == MA_CLICK
 #if MULTICLICK_ONLY_EVENT

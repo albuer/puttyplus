@@ -206,6 +206,7 @@ static const char *serial_init(void *frontend_handle, void **backend_handle,
     HANDLE serport;
     const char *err;
     char *serline;
+    char *p;
 
     serial = snew(struct serial_backend_data);
     serial->port = INVALID_HANDLE_VALUE;
@@ -217,6 +218,12 @@ static const char *serial_init(void *frontend_handle, void **backend_handle,
     serial->frontend = frontend_handle;
 
     serline = conf_get_str(conf, CONF_serline);
+    if (p=strstr(serline, "("))
+    {
+        char* new = dupstr(serline);
+        new[p-serline] = 0;
+        serline = new;
+    }
     {
 	char *msg = dupprintf("Opening serial device %s", serline);
 	logevent(serial->frontend, msg);

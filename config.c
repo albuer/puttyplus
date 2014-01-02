@@ -154,6 +154,8 @@ void conf_fontsel_handler(union control *ctrl, void *dlg,
     }
 }
 
+extern void ser_com_list_handler(union control *ctrl, void *dlg, void *data, int event);
+
 static void config_host_handler(union control *ctrl, void *dlg,
 				void *data, int event)
 {
@@ -171,7 +173,7 @@ static void config_host_handler(union control *ctrl, void *dlg,
 	     * since that's the shortcut for the host name control.
 	     */
 	    dlg_label_change(ctrl, dlg, "Serial line");
-	    dlg_editbox_set(ctrl, dlg, conf_get_str(conf, CONF_serline));
+        ser_com_list_handler(ctrl, dlg, data, event);
 	} else if (conf_get_int(conf, CONF_protocol) == PROT_CONSOLE) {
 	    dlg_label_change(ctrl, dlg, "Console program");
 	    dlg_editbox_set(ctrl, dlg, conf_get_str(conf, CONF_consoleprgm));
@@ -1273,7 +1275,8 @@ void setup_config_box(struct controlbox *b, int midsession,
 	s = ctrl_getset(b, "Session", "hostport",
 			"Specify the destination you want to connect to");
 	ctrl_columns(s, 2, 75, 25);
-	c = ctrl_editbox(s, HOST_BOX_TITLE, 'n', 100,
+
+	c = ctrl_combobox(s, HOST_BOX_TITLE, 'n', 100,
 			 HELPCTX(session_hostname),
 			 config_host_handler, I(0), I(0));
 	c->generic.column = 0;

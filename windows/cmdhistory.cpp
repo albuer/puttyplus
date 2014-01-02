@@ -7,6 +7,8 @@
 static CLinkedList cmdlst;
 static int cmd_exec_flag;
 
+int get_comm_list(int* which);
+
 void cmdh_init()
 {
     cmd_exec_flag = 1;

@@ -527,7 +527,11 @@ static void console_size(void *handle, int width, int height)
 {
     /* Do nothing! */
     Console console = (Console) handle;
+    char resize_cmd[64] = "";
     logevent(console->frontend, "console_size");
+
+//    sprintf(resize_cmd, "mode con cols=%d lines=%d\r\n", width, height);
+//    handle_write(console->out, resize_cmd, strlen(resize_cmd));
     return;
 }
 
@@ -777,7 +781,7 @@ static int key_translate(const char *key, int len)
     return result;
 }
 
-static void go_home(char* to_frontend)
+static void goto_home(char* to_frontend)
 {
     int i=0;
     for(i=0; i<(cursor_pos.y-left_limit_pos.y); i++)
@@ -796,7 +800,7 @@ static void clean_line(char* to_frontend)
     int i=0;
     char deletes_str[10];
 
-    go_home(to_frontend);
+    goto_home(to_frontend);
 
     sprintf(deletes_str, "\x1B[%dP", term_get_cols() - left_limit_pos.x);
     strcat(to_frontend, deletes_str);
@@ -892,18 +896,7 @@ static int winconso_send(void *handle, char *buf, int len)
         if (poseq(cursor_pos, left_limit_pos))
             sprintf(to_frontend, "\x07"); // bell
         else
-        {
-            int i=0;
-            for(i=0; i<(cursor_pos.y-left_limit_pos.y); i++)
-            {
-                strcat(to_frontend, "\x1B[A"); // up
-            }
-            strcat(to_frontend, "\x0D"); // return
-            for (i=0; i<left_limit_pos.x; i++)
-            {
-                strcat(to_frontend, "\x1B[C"); // right
-            }
-        }
+            goto_home(to_frontend);
         break;
     case CTRL_KEY_END:
         if (poseq(cursor_pos, right_limit_pos))
@@ -988,24 +981,13 @@ static int winconso_send(void *handle, char *buf, int len)
     default:
         if(buf[len-1] == '\r')
         {
-            {// 送前端显示，相当于按HOME键
-                int i=0;
-                for(i=0; i<(cursor_pos.y-left_limit_pos.y); i++)
-                {
-                    strcat(to_frontend, "\x1B[A"); // up
-                }
-                strcat(to_frontend, "\x0D"); // return
-                for (i=0; i<left_limit_pos.x; i++)
-                {
-                    strcat(to_frontend, "\x1B[C"); // right
-                }
-            }
-            {
-                cmdh_add(cmd_buff);
-                handle_write(console->out, cmd_buff, strlen(cmd_buff));
-                handle_write(console->out, "\r\n", 2);
-                cmd_buff[0] = '\0';
-            }
+            goto_home(to_frontend);
+            
+            // add to cmd historys
+            cmdh_add(cmd_buff);
+            handle_write(console->out, cmd_buff, strlen(cmd_buff));
+            handle_write(console->out, "\r\n", 2);
+            cmd_buff[0] = '\0';
         } else {
             if (!poseq(cursor_pos, right_limit_pos))
             {
