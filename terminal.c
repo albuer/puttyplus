@@ -5742,6 +5742,7 @@ int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
 
 int term_find_select_text(int backward)
 {
+	sblines(term);
     if (!s_select_text) return 0;
     term_find(term, s_select_text, backward, 0, 0);
 
@@ -6298,12 +6299,8 @@ void term_mouse(Terminal *term, Mouse_Button braw, Mouse_Button bcooked,
 	    clipme(term, term->selstart, term->selend,
 		   (term->seltype == RECTANGULAR), FALSE);
 	    term->selstate = SELECTED;
-	} else {
+	} else
 	    term->selstate = NO_SELECTION;
-        if (s_select_text)
-            sfree(s_select_text);
-        s_select_text = NULL;
-	}
     } else if (bcooked == MBT_PASTE
 	       && (a == MA_CLICK
 #if MULTICLICK_ONLY_EVENT

@@ -17,10 +17,16 @@ typedef struct serial_backend_data {
     int bufsize;
     long clearbreak_time;
     int break_in_progress;
+    HANDLE exitReadThread;
 } *Serial;
 
 static void serial_terminate(Serial serial)
 {
+    if (serial->exitReadThread)
+    {
+        SetEvent(serial->exitReadThread);
+    }
+    
     if (serial->out) {
 	handle_free(serial->out);
 	serial->out = NULL;
@@ -34,6 +40,11 @@ static void serial_terminate(Serial serial)
 	    ClearCommBreak(serial->port);
 	CloseHandle(serial->port);
 	serial->port = INVALID_HANDLE_VALUE;
+    }
+    if (serial->exitReadThread)
+    {
+        CloseHandle(serial->exitReadThread);
+        serial->exitReadThread = NULL;
     }
 }
 
@@ -267,13 +278,14 @@ static const char *serial_init(void *frontend_handle, void **backend_handle,
     if (err)
 	return err;
 
+    serial->exitReadThread = CreateEvent(NULL, FALSE, FALSE, NULL);
     serial->port = serport;
     serial->out = handle_output_new(serport, serial_sentdata, serial,
 				    HANDLE_FLAG_OVERLAPPED, NULL);
     serial->in = handle_input_new(serport, serial_gotdata, serial,
 				  HANDLE_FLAG_OVERLAPPED |
 				  HANDLE_FLAG_IGNOREEOF |
-				  HANDLE_FLAG_UNITBUFFER, NULL);
+				  HANDLE_FLAG_UNITBUFFER, serial->exitReadThread);
 
     *realhost = dupstr(serline);
 
