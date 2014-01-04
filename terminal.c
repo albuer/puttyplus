@@ -1503,6 +1503,14 @@ void term_clrsb(Terminal *term)
     update_sbar(term);
 }
 
+struct find_param {
+    wchar_t wstrFind[512];
+    int backward;
+    int match_case;
+    int match_whole;
+};
+struct find_param s_find;
+
 /*
  * Initialise the terminal.
  */
@@ -1584,6 +1592,11 @@ Terminal *term_init(Conf *myconf, struct unicode_data *ucsdata,
 
     term->ldisc = NULL;
 
+    s_find.backward = 1;
+    s_find.match_case = 0;
+    s_find.match_whole = 0;
+    memset(s_find.wstrFind, 0, 512*sizeof(wchar_t));
+    
     return term;
 }
 
@@ -5742,7 +5755,6 @@ int find_string(Terminal *term, pos top, pos bottom, wchar_t* str_find,
 
 int term_find_select_text(int backward)
 {
-	sblines(term);
     if (!s_select_text) return 0;
     term_find(term, s_select_text, backward, 0, 0);
 
@@ -5755,6 +5767,29 @@ int term_find(Terminal *term, wchar_t* str_find,
     pos top;
     pos bottom;
     tree234 *screen = term->screen;
+
+    if (backward==-1)
+        backward = s_find.backward;
+    else
+        s_find.backward = backward;
+    
+    if (match_case==-1)
+        match_case = s_find.match_case;
+    else
+        s_find.match_case = match_case;
+    
+    if (match_whole==-1)
+        match_whole = s_find.match_whole;
+    else
+        s_find.match_whole = match_whole;
+    
+    if (str_find==NULL)
+        str_find = s_find.wstrFind;
+    else
+        wcscpy(s_find.wstrFind, str_find);
+
+    if(str_find[0]==0)
+        return 0;
 
     if(term->selstart.x==0 && term->selstart.y==0
         && term->selend.x==0 && term->selend.y==0)

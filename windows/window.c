@@ -44,6 +44,8 @@
 #define IDM_CLRSS     0x0080
 #define IDM_STOP      0x0090
 #define IDM_FIND      0x0100
+#define IDM_FIND_PREV 0x0110
+#define IDM_FIND_NEXT 0x0120
 #define IDM_HELP      0x0140
 #define IDM_ABOUT     0x0150
 #define IDM_SAVEDSESS 0x0160
@@ -142,6 +144,7 @@ static struct {
 } popup_menus[2];
 enum { SYSMENU, CTXMENU };
 static HMENU savedsess_menu;
+static HMENU find_menu;
 
 Conf *conf;			       /* exported to windlg.c */
 
@@ -296,7 +299,7 @@ static void start_backend(void)
 	DeleteMenu(popup_menus[i].menu, IDM_RESTART, MF_BYCOMMAND);
     DeleteMenu(popup_menus[i].menu, IDM_STOP, MF_BYCOMMAND);
     InsertMenu(popup_menus[i].menu, IDM_DUPSESS, MF_BYCOMMAND | MF_ENABLED,
-           IDM_STOP, "Stop Session");
+           IDM_STOP, "Stop Session\t[Ctrl+Shift+S]");
     }
 
     must_close_session = FALSE;
@@ -332,7 +335,7 @@ static void close_session(void)
     for (i = 0; i < lenof(popup_menus); i++) {
 	DeleteMenu(popup_menus[i].menu, IDM_RESTART, MF_BYCOMMAND);
 	InsertMenu(popup_menus[i].menu, IDM_DUPSESS, MF_BYCOMMAND | MF_ENABLED,
-		   IDM_RESTART, "&Restart Session");
+		   IDM_RESTART, "&Restart Session\t[Enter]/[Ctrl+Shift+S]");
     DeleteMenu(popup_menus[i].menu, IDM_STOP, MF_BYCOMMAND);
     }
 
@@ -809,6 +812,11 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 	AppendMenu(popup_menus[CTXMENU].menu, MF_ENABLED, IDM_PASTE, "&Paste");
 
 	savedsess_menu = CreateMenu();
+    find_menu = CreateMenu();
+    AppendMenu(find_menu, MF_ENABLED, IDM_FIND, "&Find\t[Ctrl+Shift+F]");
+    AppendMenu(find_menu, MF_SEPARATOR, 0, 0);
+    AppendMenu(find_menu, MF_ENABLED, IDM_FIND_PREV, "&Find prev\t[F3]");
+    AppendMenu(find_menu, MF_ENABLED, IDM_FIND_NEXT, "&Find next\t[F4]");
 	get_sesslist(&sesslist, TRUE);
 	update_savedsess_menu();
 
@@ -824,11 +832,12 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
 		       "Sa&ved Sessions");
 	    AppendMenu(m, MF_ENABLED, IDM_RECONF, "Chan&ge Settings...");
 	    AppendMenu(m, MF_SEPARATOR, 0, 0);
-	    AppendMenu(m, MF_ENABLED, IDM_COPYALL, "C&opy All to Clipboard");
+	    AppendMenu(m, MF_ENABLED, IDM_COPYALL, "C&opy All to Clipboard\t[Ctrl+Shift+A]");
 	    AppendMenu(m, MF_ENABLED, IDM_CLRSB, "C&lear Scrollback");
 	    AppendMenu(m, MF_ENABLED, IDM_RESET, "Rese&t Terminal");
-	    AppendMenu(m, MF_ENABLED, IDM_CLRSS, "Clear Screen and Scrollback");
-	    AppendMenu(m, MF_ENABLED, IDM_FIND, "&Find");
+	    AppendMenu(m, MF_ENABLED, IDM_CLRSS, "Clear Screen and Scrollback\t[Ctrl+Shift+Z]");
+//	    AppendMenu(m, MF_ENABLED, IDM_FIND, "&Find");
+	    AppendMenu(m, MF_POPUP | MF_ENABLED, (UINT)find_menu, "Find");
 	    AppendMenu(m, MF_SEPARATOR, 0, 0);
 	    AppendMenu(m, (conf_get_int(conf, CONF_resize_action)
 			   == RESIZE_DISABLED) ? MF_GRAYED : MF_ENABLED,
@@ -2120,6 +2129,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 	    break;
         case IDM_FIND:
             showfind(hwnd);
+            break;
+        case IDM_FIND_PREV:
+            term_find(term, NULL, 1, -1, -1);
+            break;
+        case IDM_FIND_NEXT:
+            term_find(term, NULL, 0, -1, -1);
             break;
 	  case IDM_NEWSESS:
 	  case IDM_DUPSESS:
@@ -4207,7 +4222,7 @@ static int TranslateKey(UINT message, WPARAM wParam, LPARAM lParam,
             break;
         }
         if (hotkey) return -1;
-    } else if(shift_state == 0 && !left_alt) {
+    } else if(shift_state == 1 && !left_alt) {
         int hotkey = 0;
         extern int term_find_select_text(int backward);
         switch(wParam)
@@ -4218,6 +4233,20 @@ static int TranslateKey(UINT message, WPARAM wParam, LPARAM lParam,
             break;
         case VK_F3:
             term_find_select_text(1);
+            hotkey = 1;
+            break;
+        }
+        if (hotkey) return -1;
+    } else if(shift_state == 0 && !left_alt) {
+        int hotkey = 0;
+        switch(wParam)
+        {
+        case VK_F4:
+            term_find(term, NULL, 0, -1, -1);
+            hotkey = 1;
+            break;
+        case VK_F3:
+            term_find(term, NULL, 1, -1, -1);
             hotkey = 1;
             break;
         }

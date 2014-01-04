@@ -276,14 +276,12 @@ static void console_terminate(Console console)
     	handle_free(console->in);
     	console->in = NULL;
     }
-    // clear cmd history list
 }
 
 // 当对端有数据输出时，调用该函数来处理
 static int console_gotdata(struct handle *h, void *data, int len)
 {
     Console console = (Console)handle_get_privdata(h);
-    logevent(console->frontend, "console_gotdata");
     if (len <= 0) {
         const char *error_msg;
     	/*
@@ -308,8 +306,6 @@ static int console_gotdata(struct handle *h, void *data, int len)
         BOOL no_child = (find_child_process(console->dwProcessId, process_has_childs)==0);
         if( no_child != win_console )
         {
-			// clean cmd buffer
-//			cmdh_init();
             win_console = no_child;
         }
 
@@ -320,11 +316,6 @@ static int console_gotdata(struct handle *h, void *data, int len)
             from_backend(console->frontend, 0, buff, buff_len);
         }
         else {
-            char* p = (char*)data;
-            if(win_console && p[len-1]=='>'){
-                p[len++]=' ';
-                p[len]='\0';
-            }
             from_backend(console->frontend, 0, data, len);
         }
 
@@ -340,7 +331,6 @@ static int console_gotdata(struct handle *h, void *data, int len)
 static void console_sentdata(struct handle *h, int new_backlog)
 {
     Console console = (Console)handle_get_privdata(h);
-    logevent(console->frontend, "console_sentdata");
     if (new_backlog < 0) {
         const char *error_msg = "Error writing to console device";
         console_terminate(console);
@@ -414,11 +404,6 @@ static const char *console_init(void *frontend_handle, void **backend_handle,
         win_console = 0;
 	}
 
-    {
-    	char *msg = dupprintf("running program: %s", prgm);
-    	logevent(console->frontend, msg);
-    }
-
 	if( !CreateProcess(NULL, shellCmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi) )
 	{
         return "Create process failed!";
@@ -469,7 +454,6 @@ static int console_send(void *handle, char *buf, int len)
 {
     Console console = (Console) handle;
     int ret = 0;
-    logevent(console->frontend, "console_send");
 
     if (console->out == NULL)
     	return 0;
@@ -501,7 +485,6 @@ static int console_send(void *handle, char *buf, int len)
 static int console_sendbuffer(void *handle)
 {
     Console console = (Console) handle;
-    logevent(console->frontend, "console_sendbuffer");
     return console->bufsize;
 }
 
@@ -511,12 +494,6 @@ static int console_sendbuffer(void *handle)
 static void console_size(void *handle, int width, int height)
 {
     /* Do nothing! */
-    Console console = (Console) handle;
-    char resize_cmd[64] = "";
-    logevent(console->frontend, "console_size");
-
-//    sprintf(resize_cmd, "mode con cols=%d lines=%d\r\n", width, height);
-//    handle_write(console->out, resize_cmd, strlen(resize_cmd));
     return;
 }
 
@@ -525,8 +502,6 @@ static void console_size(void *handle, int width, int height)
  */
 static void console_special(void *handle, Telnet_Special code)
 {
-    Console console = (Console) handle;
-    logevent(console->frontend, "console_special");
     return;
 }
 
@@ -540,23 +515,18 @@ static const struct telnet_special *console_get_specials(void *handle)
 	{NULL, TS_EXITMENU}
     };
 
-    Console console = (Console) handle;
-    logevent(console->frontend, "console_get_specials");
-
     return specials;
 }
 
 static int console_connected(void *handle)
 {
     Console console = (Console) handle;
-    logevent(console->frontend, "console_connected");
     return 1;			       /* always connected */
 }
 
 static int console_sendok(void *handle)
 {
     Console console = (Console) handle;
-    logevent(console->frontend, "console_sendok");
     return 1;
 }
 
@@ -573,7 +543,6 @@ static int console_ldisc(void *handle, int option)
      * Local editing and local console are off by default.
      */
     Console console = (Console) handle;
-    logevent(console->frontend, "console_ldisc");
     return 0;
 }
 
@@ -581,14 +550,12 @@ static void console_provide_ldisc(void *handle, void *ldisc)
 {
     /* This is a stub. */
     Console console = (Console) handle;
-    logevent(console->frontend, "console_provide_ldisc");
 }
 
 static void console_provide_logctx2(void *handle, void *logctx)
 {
     /* This is a stub. */
     Console console = (Console) handle;
-    logevent(console->frontend, "console_provide_logctx2");
 }
 
 static int console_exitcode(void *handle)
@@ -608,7 +575,6 @@ static int console_exitcode(void *handle)
 static int console_cfg_info(void *handle)
 {
     Console console = (Console) handle;
-    logevent(console->frontend, "console_cfg_info");
     return 0;
 }
 
@@ -649,6 +615,7 @@ enum{
     CTRL_KEY_BACKSPACE,
     CTRL_KEY_BREAK,
     CTRL_KEY_TAB,
+    CTRL_KEY_OTHER,
 };
 
 static int key_translate(const char *key, int len)
@@ -694,6 +661,10 @@ static int key_translate(const char *key, int len)
     else if( !strncmp("\x09", key, len) )
     {// Tab
         result = CTRL_KEY_TAB;
+    }
+    else if( key[0]=='\x1B' )
+    {// other control key
+        result = CTRL_KEY_OTHER;
     }
     
     return result;
@@ -896,6 +867,7 @@ static int winconso_send(void *handle, char *buf, int len)
         sprintf(to_frontend, "^C");
         break;
     case CTRL_KEY_TAB:
+    case CTRL_KEY_OTHER:
         break;
     case CTRL_KEY_NOT:
     default:
@@ -909,8 +881,7 @@ static int winconso_send(void *handle, char *buf, int len)
             handle_write(console->out, "\r\n", 2);
             memset(cmd_buff, 0, MAX_CMD_LENGTH);
         } else {
-            if (!poseq(cursor_pos, right_limit_pos))
-            {
+            if (!poseq(cursor_pos, right_limit_pos)) {
                 int i=0;
                 char* p = cmd_buff+term_posdiff(&cursor_pos, &left_limit_pos);
                 char* newp = cmd_buff+strlen(cmd_buff)-1;
@@ -922,11 +893,13 @@ static int winconso_send(void *handle, char *buf, int len)
                 strcpy(to_frontend, p);
                 for(i=0;i<(strlen(p)-len);i++)
                     strcat(to_frontend, "\x08");
-            }
-            else {
+            } else {
                 strncpy(to_frontend, buf, len);
                 strncat(cmd_buff, buf, len);
             }
+
+            if (cursor_pos.x == (term_get_cols()-len)) // new line
+                strcat(to_frontend, "\r\n");
         }
         break;
     }

@@ -263,6 +263,10 @@ static int CALLBACK FindProc(HWND hwnd, UINT msg,
                     char msg_text[530];
                     sprintf(msg_text, "Can not find \"%s\"", strFind);
                     MessageBox(hwnd, msg_text, "Find", MB_OK|MB_ICONINFORMATION);
+                } else {
+                    findbox = NULL;
+                    SetActiveWindow(GetParent(hwnd));
+                    DestroyWindow(hwnd);
                 }
     		}
             break;
