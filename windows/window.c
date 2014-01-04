@@ -849,6 +849,7 @@ int WINAPI WinMain(HINSTANCE inst, HINSTANCE prev, LPSTR cmdline, int show)
      */
     set_input_locale(GetKeyboardLayout(0));
 
+    DragAcceptFiles(hwnd, TRUE);
     /*
      * Finally show the window!
      */
@@ -3245,6 +3246,31 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message,
 	if (process_clipdata((HGLOBAL)lParam, wParam))
 	    term_do_paste(term);
 	return 0;
+    case WM_DROPFILES:
+        {
+            HDROP hDrop = (HDROP)wParam;
+			UINT i = 0;
+            //首先查询拖进来的文件数量
+            UINT nFiles = DragQueryFile(hDrop, -1, NULL, NULL);
+            for(i = 0; i < nFiles; i++)
+            {
+                UINT nBufSize = 0;
+				char pBuf[MAX_PATH] = "";
+                //首先查询缓冲区有多大
+                nBufSize = DragQueryFile(hDrop, i, NULL, NULL);
+                //分配一个缓冲区
+                DragQueryFile(hDrop, i, pBuf, nBufSize+1);
+                // 操作文件
+                if (ldisc) {
+                    if (i>0) {
+                        char space = ' ';
+                        lpage_send(ldisc, CP_ACP, &space, 1, 1);
+                    }
+                    lpage_send(ldisc, CP_ACP, pBuf, nBufSize, 1);
+                }
+            }
+        }
+        break;
       default:
 	if (message == wm_mousewheel || message == WM_MOUSEWHEEL) {
 	    int shift_pressed=0, control_pressed=0;

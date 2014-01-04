@@ -292,7 +292,6 @@ void ser_com_list_handler(union control *ctrl, void *dlg, void *data, int event)
             get_comm_list();
     	    for (i = 0; i < com_list.count; i++){
                 sprintf(comm_name, "COM%d(%s)", com_list.com_id[i], com_list.com_name[i]);
-//                sprintf(comm_name, "COM%d", com_list.com_id[i]);
         		dlg_listbox_add(ctrl, dlg, comm_name);
             }
         }
