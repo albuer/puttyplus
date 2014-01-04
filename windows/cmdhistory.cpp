@@ -25,7 +25,7 @@ void cmdh_free()
 void cmdh_add(const char* cmd)
 {
     const char* last_cmd = (const char*)cmdlst.GetLast();
-    int cmd_len = strlen(cmd); //È¥³ý \r\n
+    int cmd_len = strlen(cmd);
 
     if(cmd_len<=0)return;
     
@@ -37,8 +37,8 @@ void cmdh_add(const char* cmd)
         
         cmdlst.Append(pdata);
         {
-            const char* cur_cmd = (const char*)cmdlst.GetCurrent();
-            if( strcmp((const char*)pdata, cur_cmd) )
+//            const char* cur_cmd = (const char*)cmdlst.GetCurrent();
+//            if( strcmp((const char*)pdata, cur_cmd) )
                 cmdlst.SetCurToTail();
         }
     }

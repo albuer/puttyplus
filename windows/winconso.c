@@ -480,22 +480,7 @@ static int console_send(void *handle, char *buf, int len)
 // 因此我们需要手动回显(把字符送给前端显示)
     if (win_console)
     {
-#if 1
         console->bufsize = winconso_send(handle, buf, len);
-#else
-        const char *show = NULL;
-        const char *send = NULL;
-        buf[len] = '\0';
-        console->bufsize = 0;
-        cmd_add_char(buf, len, &show, &send);
-        if(show)
-        {
-            from_backend(console->frontend, 0, show, strlen(show));
-            from_backend_pos(console->frontend, &right_limit_x, &right_limit_y);
-        }
-        if(send)
-            console->bufsize = handle_write(console->out, send, strlen(send));
-#endif
     }
     else
     {
@@ -649,78 +634,6 @@ Backend console_backend = {
     0
 };
 
-#if 0
-
-static int new_cmd_buf;
-
-static void cmd_add_char(const char *buf, int len)
-{
-    int key_s = 0;
-    if(new_cmd_buf)
-    {
-        cmd_buf[0] = 0;
-        new_cmd_buf = 0;
-    }
-    
-    strncat(cmd_buf, buf, len);
-    
-    if( buf[0] == '\r' )
-    {
-        // 将执行的命令加入命令历史记录
-        cmd_buf[strlen(cmd_buf)-1] = '\0';
-        cmdh_add(cmd_buf);
-
-        strcat(cmd_buf, "\r\n");
-
-        new_cmd_buf = 1;
-    }
-}
-
-// 在把数据送给backend之前，先对待发送数据进行处理
-// 如果是类unix的console，可直接返回
-// 如果是windows console，则需要处理
-static void console_presend(void *handle, char *buf, int len)
-{
-    Console console = (Console) handle;
-    int key_s = 0;
-    char* to_backend = NULL;
-    int to_backend_len = 0;
-    char* to_frontend = NULL;
-    int to_frontend_len = 0;
-
-    switch( key_s=key_translate(buf, len) )
-    {
-    case CTRL_KEY_UP:
-    case CTRL_KEY_DOWN:
-        break;
-    case CTRL_KEY_LEFT:
-        break;
-    case CTRL_KEY_BACKSPACE:
-        to_frontend = "\x08\x1b\x5b\x4b";
-        to_frontend_len = 4;
-        console_gotdata(console->in, to_frontend, to_frontend_len);
-        to_backend = "\x08";
-        to_backend_len = 1;
-        handle_write(console->out, to_backend, to_backend_len);
-        break;
-    case CTRL_KEY_INVALID:
-    default:
-        if(buf[len-1] == '\r')
-        {
-            buf[len-1] = '\n';
-        }
-        console_gotdata(console->in, buf, len);
-        handle_write(console->out, buf, len);
-        break;
-    }
-
-//    if (key_s==CTRL_KEY_INVALID)
-//       console->bufsize = handle_write(console->out, buf, len);
-
-//    console_gotdata(console->in, to_frontend, to_frontend_len);
-}
-#endif
-
 #define MAX_CMD_LENGTH  8192
 static char cmd_buff[MAX_CMD_LENGTH] = "";
 
@@ -735,6 +648,7 @@ enum{
     CTRL_KEY_DELETE,
     CTRL_KEY_BACKSPACE,
     CTRL_KEY_BREAK,
+    CTRL_KEY_TAB,
 };
 
 static int key_translate(const char *key, int len)
@@ -776,6 +690,10 @@ static int key_translate(const char *key, int len)
     else if( !strncmp("\x03", key, len) )
     {// Break
         result = CTRL_KEY_BREAK;
+    }
+    else if( !strncmp("\x09", key, len) )
+    {// Tab
+        result = CTRL_KEY_TAB;
     }
     
     return result;
@@ -977,6 +895,8 @@ static int winconso_send(void *handle, char *buf, int len)
 
         sprintf(to_frontend, "^C");
         break;
+    case CTRL_KEY_TAB:
+        break;
     case CTRL_KEY_NOT:
     default:
         if(buf[len-1] == '\r')
@@ -987,7 +907,7 @@ static int winconso_send(void *handle, char *buf, int len)
             cmdh_add(cmd_buff);
             handle_write(console->out, cmd_buff, strlen(cmd_buff));
             handle_write(console->out, "\r\n", 2);
-            cmd_buff[0] = '\0';
+            memset(cmd_buff, 0, MAX_CMD_LENGTH);
         } else {
             if (!poseq(cursor_pos, right_limit_pos))
             {

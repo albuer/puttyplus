@@ -167,6 +167,7 @@ static void config_host_handler(union control *ctrl, void *dlg,
      * different places depending on the protocol.
      */
     if (event == EVENT_REFRESH) {
+        dlg_listbox_clear(ctrl, dlg);
 	if (conf_get_int(conf, CONF_protocol) == PROT_SERIAL) {
 	    /*
 	     * This label text is carefully chosen to contain an n,
