@@ -69,6 +69,8 @@ char *EMPTY_WINDOW_TITLE = "";
 
 const char sco2ansicolour[] = { 0, 4, 2, 6, 1, 5, 3, 7 };
 
+int xyz_ReceiveData(Terminal *term, const u_char *buffer, int len);
+
 #define sel_nl_sz  (sizeof(sel_nl)/sizeof(wchar_t))
 const wchar_t sel_nl[] = SEL_NL;
 
@@ -1596,7 +1598,10 @@ Terminal *term_init(Conf *myconf, struct unicode_data *ucsdata,
     s_find.match_case = 0;
     s_find.match_whole = 0;
     memset(s_find.wstrFind, 0, 512*sizeof(wchar_t));
-    
+
+    term->xyz_transfering = 0;
+    term->xyz_Internals = NULL;
+
     return term;
 }
 
@@ -6472,6 +6477,12 @@ int term_ldisc(Terminal *term, int option)
 
 int term_data(Terminal *term, int is_stderr, const char *data, int len)
 {
+    if (term->xyz_transfering && !is_stderr)
+    {
+    	return xyz_ReceiveData(term, data, len);
+    }
+    else
+    {
     bufchain_add(&term->inbuf, data, len);
 
     if (!term->in_term_out) {
@@ -6485,6 +6496,7 @@ int term_data(Terminal *term, int is_stderr, const char *data, int len)
 	if (term->selstate != DRAGGING)
 	    term_out(term);
 	term->in_term_out = FALSE;
+    }
     }
 
     /*

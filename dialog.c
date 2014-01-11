@@ -423,6 +423,18 @@ union control *ctrl_fontsel(struct controlset *s,char *label,char shortcut,
     return c;
 }
 
+union control *ctrl_directorysel(struct controlset *s,char *label,char shortcut,
+			    char *title,
+			    intorptr helpctx, handler_fn handler,
+			    intorptr context)
+{
+    union control *c = ctrl_new(s, CTRL_DIRECTORYSELECT, helpctx, handler, context);
+    c->fileselect.label = label ? dupstr(label) : NULL;
+    c->fileselect.shortcut = shortcut;
+    c->fileselect.title = dupstr(title);
+    return c;
+}
+
 union control *ctrl_tabdelay(struct controlset *s, union control *ctrl)
 {
     union control *c = ctrl_new(s, CTRL_TABDELAY, P(NULL), NULL, P(NULL));
@@ -469,6 +481,27 @@ void ctrl_free(union control *ctrl)
       case CTRL_FILESELECT:
 	sfree(ctrl->fileselect.title);
 	break;
+      case CTRL_DIRECTORYSELECT:
+	sfree(ctrl->fileselect.title);
+	break;
     }
     sfree(ctrl);
 }
+
+void dlg_stddirectorysel_handler(union control *ctrl, void *dlg,
+			    void *data, int event)
+{
+    /*
+     * The standard file-selector handler expects the `context'
+     * field to contain the `offsetof' a Filename field in the
+     * structure pointed to by `data'.
+     */
+    int offset = ctrl->directoryselect.context.i;
+
+    if (event == EVENT_REFRESH) {
+	dlg_directorysel_set(ctrl, dlg, *(Filename *)ATOFFSET(data, offset));
+    } else if (event == EVENT_VALCHANGE) {
+	dlg_directorysel_get(ctrl, dlg, (Filename *)ATOFFSET(data, offset));
+    }
+}
+

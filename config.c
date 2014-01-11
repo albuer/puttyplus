@@ -2468,4 +2468,42 @@ void setup_config_box(struct controlbox *b, int midsession,
 			  sshbug_handler, I(CONF_sshbug_maxpkt2));
 	}
     }
+    
+     // z-modem panel
+     ctrl_settitle(b, "Connection/ZModem",
+               "Options controlling Z Modem transfers");
+    
+     s = ctrl_getset(b, "Connection/ZModem", "receive",
+             "Receive command");
+    
+     ctrl_filesel(s, "Command:", NO_SHORTCUT,
+          FILTER_EXE_FILES, FALSE, "Select command to receive zmodem data",
+          HELPCTX(zmodem_rzcommand),
+          dlg_stdfilesel_handler, I(offsetof(Config, rzcommand)));
+    
+     ctrl_editbox(s, "Options", NO_SHORTCUT, 50,
+              HELPCTX(zmodem_rzoptions),
+              dlg_stdeditbox_handler, I(offsetof(Config,rzoptions)),
+              I(sizeof(((Config *)0)->rzoptions)));
+    
+    
+     s = ctrl_getset(b, "Connection/ZModem", "send",
+             "Send command");
+    
+     ctrl_filesel(s, "Command:", NO_SHORTCUT,
+          FILTER_EXE_FILES, FALSE, "Select command to send zmodem data",
+          HELPCTX(zmodem_szcommand),
+          dlg_stdfilesel_handler, I(offsetof(Config, szcommand)));
+     ctrl_editbox(s, "Options", NO_SHORTCUT, 50,
+              HELPCTX(zmodem_szoptions),
+              dlg_stdeditbox_handler, I(offsetof(Config,szoptions)),
+              I(sizeof(((Config *)0)->szoptions)));
+    
+    s = ctrl_getset(b, "Connection/ZModem", "download",
+             "Download folder");
+    
+     ctrl_directorysel(s, "Location:", NO_SHORTCUT,
+          "Select location for downloading files",
+          HELPCTX(zmodem_zdownloaddir),
+          dlg_stddirectorysel_handler, I(offsetof(Config, zdownloaddir)));
 }
