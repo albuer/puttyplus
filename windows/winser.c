@@ -328,6 +328,13 @@ static int serial_send(void *handle, char *buf, int len)
     if (serial->out == NULL)
 	return 0;
 
+    if( !strncmp("\x1b\x5b\x31\x35\x7e", buf, len) )
+    {// use F5 to enter FIQ debug mode
+        SetCommBreak(serial->port);
+        ClearCommBreak(serial->port);
+		return 0;
+    }
+
     serial->bufsize = handle_write(serial->out, buf, len);
     return serial->bufsize;
 }
