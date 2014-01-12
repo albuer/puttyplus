@@ -170,9 +170,7 @@
 #define WINHELP_CTX_puttygen_load "puttygen.load:puttygen-load"
 #define WINHELP_CTX_puttygen_conversions "puttygen.conversions:puttygen-conversions"
 #define WINHELP_CTX_zmodem_rzcommand "zmodem.rzcommand"
-#define WINHELP_CTX_zmodem_rzoptions "zmodem.rzoptions"
 #define WINHELP_CTX_zmodem_szcommand "zmodem.szcommand"
-#define WINHELP_CTX_zmodem_szoptions "zmodem.szoptions"
 #define WINHELP_CTX_zmodem_zdownloaddir "zmodem.zdownloaddir"
 
 /* These are used in Windows-specific bits of the frontend.

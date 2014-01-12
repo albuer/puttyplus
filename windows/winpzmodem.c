@@ -9,7 +9,7 @@ void xyz_ReceiveInit(Terminal *term);
 int xyz_ReceiveData(Terminal *term, const u_char *buffer, int len);
 static int xyz_SpawnProcess(Terminal *term, const char *incommand, const char *inparams);
 
-#define MAX_UPLOAD_FILES 512
+#define LSZRZ_OPTIONS       "-b -e -v -y"
 
 #define PIPE_SIZE (64*1024)
 
@@ -151,7 +151,18 @@ static int xyz_Check(Backend *back, void *backhandle, Terminal *term, int outerr
 
 void xyz_ReceiveInit(Terminal *term)
 {
-	if (xyz_SpawnProcess(term, term->cfg.rzcommand, term->cfg.rzoptions) == 0) {
+    char szcmd[MAX_PATH] = "\0";
+//	if (xyz_SpawnProcess(term, term->cfg.rzcommand, term->cfg.rzoptions) == 0) {
+    {
+        char *pp=NULL;
+        GetModuleFileName(NULL, szcmd, MAX_PATH);
+        pp = strrchr(szcmd, '\\');
+        if (pp)
+            *(pp+1) = '\0';
+        strcat(szcmd, conf_get_str(term->conf, CONF_rzcommand));
+    }
+
+	if (xyz_SpawnProcess(term, szcmd, LSZRZ_OPTIONS) == 0) {
 		term->xyz_transfering = 1;
 	}
 }
@@ -174,6 +185,7 @@ void xyz_StartSending(Terminal *term)
 
 	if (res)
 	{
+        char szcmd[MAX_PATH] = "\0";
 		char sz_full_params[32767];
 		char *p, *curparams;
 		p = filenames;
@@ -181,7 +193,7 @@ void xyz_StartSending(Terminal *term)
 		curparams = sz_full_params;
 		sz_full_params[0] = 0;
 
-		curparams += sprintf(curparams, "%s", term->cfg.szoptions);
+		curparams += sprintf(curparams, "%s", LSZRZ_OPTIONS);
 
 		if (*(p+strlen(filenames)+1)==0) {
 			sprintf(curparams, " \"%s\"", filenames);
@@ -193,7 +205,17 @@ void xyz_StartSending(Terminal *term)
 				curparams += sprintf(curparams, " \"%s\\%s\"", filenames, p);
 			}
 		}
-		if (xyz_SpawnProcess(term, term->cfg.szcommand, sz_full_params) == 0) {
+
+        {
+            char *pp=NULL;
+            GetModuleFileName(NULL, szcmd, MAX_PATH);
+            pp = strrchr(szcmd, '\\');
+            if (pp)
+                *(pp+1) = '\0';
+            strcat(szcmd, conf_get_str(term->conf, CONF_szcommand));
+        }
+
+		if (xyz_SpawnProcess(term, szcmd, sz_full_params) == 0) {
 			term->xyz_transfering = 1;
 		}
 	}
@@ -316,7 +338,7 @@ static int xyz_SpawnProcess(Terminal *term, const char *incommand, const char *i
 		}
 		sprintf(params, "%s %s", p, inparams);
 
-		if (!CreateProcess(incommand,params,NULL, NULL,TRUE,CREATE_NEW_CONSOLE, NULL,term->cfg.zdownloaddir,&si,&term->xyz_Internals->pi))
+		if (!CreateProcess(incommand,params,NULL, NULL,TRUE,CREATE_NEW_CONSOLE, NULL,conf_get_str(term->conf, CONF_zdownloaddir),&si,&term->xyz_Internals->pi))
 		{
 			DWORD err = GetLastError();
 	//		ErrorMessage("CreateProcess");
@@ -371,3 +393,45 @@ int xyz_ReceiveData(Terminal *term, const u_char *buffer, int len)
 
 	return 0 ;
 }
+
+/*
+    0  - not lszrz
+    1  - remote sz
+    2  - remote rz
+ */
+int xyz_is_lszrz_cmd(const char* data, int len)
+{
+    int ret = 0;
+    
+    if (len == 21){
+        if (!memcmp(data, "**\30B0", 5) && !memcmp(data+18, "\x0d\x8a\x11", 3))
+        {
+            if(data[5]=='0'){
+                // remote sz
+                logevent(NULL, "remote sz");
+                ret = 1;
+            } else if (data[5]=='1') {
+                // remote rz
+                logevent(NULL, "remote rz");
+                ret = 2;
+            }
+        }
+    } else if(len==24){
+        if (!memcmp(data, "rz\r**\30B00", 9) && !memcmp(data+21, "\x0d\x8a\x11", 3))
+        {
+            // remote sz
+            logevent(NULL, "remote sz");
+            ret = 1;
+        }
+    } else if(len==43){
+        if (!memcmp(data, "rz waiting to receive.**\30B01", 28) && !memcmp(data+40, "\x0d\x8a\x11", 3))
+        {
+            // remote rz
+            logevent(NULL, "remote rz");
+            ret = 2;
+        }
+    }
+
+    return ret;
+}
+

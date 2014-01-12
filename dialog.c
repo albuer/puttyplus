@@ -488,20 +488,3 @@ void ctrl_free(union control *ctrl)
     sfree(ctrl);
 }
 
-void dlg_stddirectorysel_handler(union control *ctrl, void *dlg,
-			    void *data, int event)
-{
-    /*
-     * The standard file-selector handler expects the `context'
-     * field to contain the `offsetof' a Filename field in the
-     * structure pointed to by `data'.
-     */
-    int offset = ctrl->directoryselect.context.i;
-
-    if (event == EVENT_REFRESH) {
-	dlg_directorysel_set(ctrl, dlg, *(Filename *)ATOFFSET(data, offset));
-    } else if (event == EVENT_VALCHANGE) {
-	dlg_directorysel_get(ctrl, dlg, (Filename *)ATOFFSET(data, offset));
-    }
-}
-

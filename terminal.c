@@ -6475,14 +6475,22 @@ int term_ldisc(Terminal *term, int option)
     return FALSE;
 }
 
+extern int xyz_is_lszrz_cmd(const char* data, int len);
+
 int term_data(Terminal *term, int is_stderr, const char *data, int len)
 {
+    int is_lszrz = 0;
     if (term->xyz_transfering && !is_stderr)
     {
     	return xyz_ReceiveData(term, data, len);
     }
-    else
-    {
+    else if (is_lszrz = xyz_is_lszrz_cmd(data, len)) {
+        if (is_lszrz==1)
+            xyz_ReceiveInit(term);
+        else if(is_lszrz==2)
+            xyz_StartSending(term);
+        xyz_updateMenuItems(term);
+    }else{
     bufchain_add(&term->inbuf, data, len);
 
     if (!term->in_term_out) {

@@ -1222,6 +1222,36 @@ static void portfwd_handler(union control *ctrl, void *dlg,
     }
 }
 
+static void dlg_stddirectorysel_handler(union control *ctrl, void *dlg,
+			    void *data, int event)
+{
+    /*
+     * The standard file-selector handler expects the `context'
+     * field to contain the `offsetof' a Filename field in the
+     * structure pointed to by `data'.
+     */
+    int offset = ctrl->directoryselect.context.i;
+
+Conf *conf = (Conf *)data;
+
+/*
+if (event == EVENT_REFRESH) {
+    char *field = conf_get_str(conf, key);
+    dlg_editbox_set(ctrl, dlg, field);
+} else if (event == EVENT_VALCHANGE) {
+    char *field = dlg_editbox_get(ctrl, dlg);
+    conf_set_str(conf, key, field);
+    sfree(field);
+}
+*/
+    if (event == EVENT_REFRESH) {
+//    	dlg_directorysel_set(ctrl, dlg, conf_get_str(data, offset));
+    } else if (event == EVENT_VALCHANGE) {
+        
+    	dlg_directorysel_get(ctrl, dlg, (Filename *)conf_get_str(data, offset));
+    }
+}
+
 void setup_config_box(struct controlbox *b, int midsession,
 		      int protocol, int protcfginfo)
 {
@@ -2475,21 +2505,18 @@ void setup_config_box(struct controlbox *b, int midsession,
     
      s = ctrl_getset(b, "Connection/ZModem", "receive",
              "Receive command");
-    
-     ctrl_filesel(s, "Command:", NO_SHORTCUT,
-          FILTER_EXE_FILES, FALSE, "Select command to receive zmodem data",
+
+     ctrl_editbox(s, "Command:", NO_SHORTCUT, 80,
           HELPCTX(zmodem_rzcommand),
-          dlg_stdfilesel_handler, I(offsetof(Config, rzcommand)));
-    
-     ctrl_editbox(s, "Options", NO_SHORTCUT, 50,
-              HELPCTX(zmodem_rzoptions),
-              dlg_stdeditbox_handler, I(offsetof(Config,rzoptions)),
-              I(sizeof(((Config *)0)->rzoptions)));
-    
-    
+          conf_editbox_handler, I(CONF_rzcommand), I(1));
+
      s = ctrl_getset(b, "Connection/ZModem", "send",
              "Send command");
-    
+
+     ctrl_editbox(s, "Command:", NO_SHORTCUT, 80,
+          HELPCTX(zmodem_szcommand),
+          conf_editbox_handler, I(CONF_szcommand), I(1));
+/*
      ctrl_filesel(s, "Command:", NO_SHORTCUT,
           FILTER_EXE_FILES, FALSE, "Select command to send zmodem data",
           HELPCTX(zmodem_szcommand),
@@ -2498,12 +2525,19 @@ void setup_config_box(struct controlbox *b, int midsession,
               HELPCTX(zmodem_szoptions),
               dlg_stdeditbox_handler, I(offsetof(Config,szoptions)),
               I(sizeof(((Config *)0)->szoptions)));
-    
-    s = ctrl_getset(b, "Connection/ZModem", "download",
+*/
+     s = ctrl_getset(b, "Connection/ZModem", "download",
              "Download folder");
+
     
+    ctrl_editbox(s, "Location:", NO_SHORTCUT, 80,
+         HELPCTX(zmodem_zdownloaddir),
+         conf_editbox_handler, I(CONF_zdownloaddir), I(1));
+/*
      ctrl_directorysel(s, "Location:", NO_SHORTCUT,
           "Select location for downloading files",
           HELPCTX(zmodem_zdownloaddir),
-          dlg_stddirectorysel_handler, I(offsetof(Config, zdownloaddir)));
+          dlg_stddirectorysel_handler, I(CONF_zdownloaddir));
+          */
 }
+

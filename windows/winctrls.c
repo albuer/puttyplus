@@ -2384,12 +2384,12 @@ FontSpec *dlg_fontsel_get(union control *ctrl, void *dlg)
     return fontspec_copy((FontSpec *)c->data);
 }
 
-void dlg_directorysel_set(union control *ctrl, void *dlg, Filename fn)
+void dlg_directorysel_set(union control *ctrl, void *dlg, char* str)
 {
     struct dlgparam *dp = (struct dlgparam *)dlg;
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
     assert(c && c->ctrl->generic.type == CTRL_DIRECTORYSELECT);
-    SetDlgItemText(dp->hwnd, c->base_id+1, fn.path);
+    SetDlgItemText(dp->hwnd, c->base_id+1, str);
 }
 
 void dlg_directorysel_get(union control *ctrl, void *dlg, Filename *fn)
