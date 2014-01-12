@@ -861,9 +861,7 @@ void cleanup_exit(int);
     X(STR, NONE, winclass) \
     X(STR, NONE, consoleprgm) \
     /* Z modem options */ \
-    X(STR, NONE, rzcommand) \
-    X(STR, NONE, szcommand) \
-    X(STR, NONE, zdownloaddir) \
+    X(FILENAME, NONE, zdownloaddir) \
 
 /* Now define the actual enum of option keywords using that macro. */
 #define CONF_ENUM_DEF(valtype, keytype, keyword) CONF_ ## keyword,

@@ -639,9 +639,7 @@ void save_open_settings(void *sesskey, Conf *conf)
     write_setting_s(sesskey, "WindowClass", conf_get_str(conf, CONF_winclass));
     write_setting_s(sesskey, "ConsoleProgram", conf_get_str(conf, CONF_consoleprgm));
     /* z-modem settings */
-    write_setting_s(sesskey, "rzCommand", conf_get_str(conf, CONF_rzcommand));
-    write_setting_s(sesskey, "szCommand", conf_get_str(conf, CONF_szcommand));
-    write_setting_s(sesskey, "zDownloadDir", conf_get_str(conf, CONF_zdownloaddir));
+    write_setting_filename(sesskey, "zDownloadDir", conf_get_filename(conf, CONF_zdownloaddir));
 }
 
 void load_settings(char *section, Conf *conf)
@@ -988,9 +986,7 @@ void load_open_settings(void *sesskey, Conf *conf)
     gpps(sesskey, "ConsoleProgram", "", conf, CONF_consoleprgm);
 
     /* z-modem settings */
-    gpps(sesskey, "rzCommand", "rz.exe", conf, CONF_rzcommand);
-    gpps(sesskey, "szCommand", "sz.exe", conf, CONF_szcommand);
-    gpps(sesskey, "zDownloadDir", "C:\\", conf, CONF_zdownloaddir);
+    gppfile(sesskey, "zDownloadDir", conf, CONF_zdownloaddir);
 }
 
 void do_defaults(char *session, Conf *conf)

@@ -18,6 +18,8 @@ Filename *platform_default_filename(const char *name)
 {
     if (!strcmp(name, "LogFileName"))
 	return filename_from_str("putty.log");
+    else if(!strcmp(name, "zDownloadDir"))
+    return filename_from_str("C:\\");
     else
 	return filename_from_str("");
 }

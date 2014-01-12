@@ -126,7 +126,7 @@ static int xyz_Check(Backend *back, void *backhandle, Terminal *term, int outerr
 					}
 #endif
 					if (outerr) {
-						back->send(backhandle, buf, bread);
+                        back->send(backhandle, buf, bread);
 					} else {
 						from_backend(term, 1, buf, bread);
 					}
@@ -159,7 +159,7 @@ void xyz_ReceiveInit(Terminal *term)
         pp = strrchr(szcmd, '\\');
         if (pp)
             *(pp+1) = '\0';
-        strcat(szcmd, conf_get_str(term->conf, CONF_rzcommand));
+        strcat(szcmd, "rz.exe");
     }
 
 	if (xyz_SpawnProcess(term, szcmd, LSZRZ_OPTIONS) == 0) {
@@ -212,7 +212,7 @@ void xyz_StartSending(Terminal *term)
             pp = strrchr(szcmd, '\\');
             if (pp)
                 *(pp+1) = '\0';
-            strcat(szcmd, conf_get_str(term->conf, CONF_szcommand));
+            strcat(szcmd, "sz.exe");
         }
 
 		if (xyz_SpawnProcess(term, szcmd, sz_full_params) == 0) {
@@ -338,7 +338,7 @@ static int xyz_SpawnProcess(Terminal *term, const char *incommand, const char *i
 		}
 		sprintf(params, "%s %s", p, inparams);
 
-		if (!CreateProcess(incommand,params,NULL, NULL,TRUE,CREATE_NEW_CONSOLE, NULL,conf_get_str(term->conf, CONF_zdownloaddir),&si,&term->xyz_Internals->pi))
+		if (!CreateProcess(incommand,params,NULL, NULL,TRUE,CREATE_NEW_CONSOLE, NULL,(conf_get_filename(term->conf, CONF_zdownloaddir))->path,&si,&term->xyz_Internals->pi))
 		{
 			DWORD err = GetLastError();
 	//		ErrorMessage("CreateProcess");

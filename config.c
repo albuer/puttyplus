@@ -139,6 +139,23 @@ void conf_filesel_handler(union control *ctrl, void *dlg,
     }
 }
 
+void conf_directory_handler(union control *ctrl, void *dlg,
+			  void *data, int event)
+{
+    int key = ctrl->fileselect.context.i;
+    Conf *conf = (Conf *)data;
+
+    if (event == EVENT_REFRESH) {
+//    	dlg_filesel_set(ctrl, dlg, conf_get_filename(conf, key));
+        dlg_directorysel_set(ctrl, dlg, conf_get_filename(conf, key));
+    } else if (event == EVENT_VALCHANGE) {
+        Filename *filename = dlg_directorysel_get(ctrl, dlg);
+//    	Filename *filename = dlg_filesel_get(ctrl, dlg);
+    	conf_set_filename(conf, key, filename);
+        filename_free(filename);
+    }
+}
+
 void conf_fontsel_handler(union control *ctrl, void *dlg,
 			  void *data, int event)
 {
@@ -1222,6 +1239,7 @@ static void portfwd_handler(union control *ctrl, void *dlg,
     }
 }
 
+#if 0
 static void dlg_stddirectorysel_handler(union control *ctrl, void *dlg,
 			    void *data, int event)
 {
@@ -1251,6 +1269,7 @@ if (event == EVENT_REFRESH) {
     	dlg_directorysel_get(ctrl, dlg, (Filename *)conf_get_str(data, offset));
     }
 }
+#endif
 
 void setup_config_box(struct controlbox *b, int midsession,
 		      int protocol, int protcfginfo)
@@ -2502,37 +2521,25 @@ void setup_config_box(struct controlbox *b, int midsession,
      // z-modem panel
      ctrl_settitle(b, "Connection/ZModem",
                "Options controlling Z Modem transfers");
-    
-     s = ctrl_getset(b, "Connection/ZModem", "receive",
-             "Receive command");
 
-     ctrl_editbox(s, "Command:", NO_SHORTCUT, 80,
-          HELPCTX(zmodem_rzcommand),
-          conf_editbox_handler, I(CONF_rzcommand), I(1));
-
-     s = ctrl_getset(b, "Connection/ZModem", "send",
-             "Send command");
-
-     ctrl_editbox(s, "Command:", NO_SHORTCUT, 80,
-          HELPCTX(zmodem_szcommand),
-          conf_editbox_handler, I(CONF_szcommand), I(1));
-/*
-     ctrl_filesel(s, "Command:", NO_SHORTCUT,
-          FILTER_EXE_FILES, FALSE, "Select command to send zmodem data",
-          HELPCTX(zmodem_szcommand),
-          dlg_stdfilesel_handler, I(offsetof(Config, szcommand)));
-     ctrl_editbox(s, "Options", NO_SHORTCUT, 50,
-              HELPCTX(zmodem_szoptions),
-              dlg_stdeditbox_handler, I(offsetof(Config,szoptions)),
-              I(sizeof(((Config *)0)->szoptions)));
-*/
      s = ctrl_getset(b, "Connection/ZModem", "download",
              "Download folder");
 
-    
+//    ctrl_filesel(s, "Location:", NO_SHORTCUT,
+//		 NULL, TRUE, "Select session log file name",
+//		 HELPCTX(logging_filename),
+//		 conf_filesel_handler, I(CONF_logfilename));
+
+    ctrl_directorysel(s, "Location:", NO_SHORTCUT,
+         "Select location for downloading files",
+         HELPCTX(zmodem_zdownloaddir),
+         conf_directory_handler, I(CONF_zdownloaddir));
+
+ /*   
     ctrl_editbox(s, "Location:", NO_SHORTCUT, 80,
          HELPCTX(zmodem_zdownloaddir),
          conf_editbox_handler, I(CONF_zdownloaddir), I(1));
+         */
 /*
      ctrl_directorysel(s, "Location:", NO_SHORTCUT,
           "Select location for downloading files",

@@ -3,7 +3,7 @@
  */
 
 //#define SVN_REV 3
-#define RELEASE 1.0
+#define RELEASE 1.01
 
 #define STR1(x) #x
 #define STR(x) STR1(x)

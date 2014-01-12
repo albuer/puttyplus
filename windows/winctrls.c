@@ -2384,21 +2384,25 @@ FontSpec *dlg_fontsel_get(union control *ctrl, void *dlg)
     return fontspec_copy((FontSpec *)c->data);
 }
 
-void dlg_directorysel_set(union control *ctrl, void *dlg, char* str)
+void dlg_directorysel_set(union control *ctrl, void *dlg, Filename* fn)
 {
     struct dlgparam *dp = (struct dlgparam *)dlg;
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
     assert(c && c->ctrl->generic.type == CTRL_DIRECTORYSELECT);
-    SetDlgItemText(dp->hwnd, c->base_id+1, str);
+    SetDlgItemText(dp->hwnd, c->base_id+1, fn->path);
 }
 
-void dlg_directorysel_get(union control *ctrl, void *dlg, Filename *fn)
+Filename *dlg_directorysel_get(union control *ctrl, void *dlg)
 {
     struct dlgparam *dp = (struct dlgparam *)dlg;
     struct winctrl *c = dlg_findbyctrl(dp, ctrl);
+    char *tmp;
+    Filename *ret;
     assert(c && c->ctrl->generic.type == CTRL_DIRECTORYSELECT);
-    GetDlgItemText(dp->hwnd, c->base_id+1, fn->path, lenof(fn->path));
-    fn->path[lenof(fn->path)-1] = '\0';
+    tmp = GetDlgItemText_alloc(dp->hwnd, c->base_id+1);
+    ret = filename_from_str(tmp);
+    sfree(tmp);
+    return ret;
 }
 
 /*
