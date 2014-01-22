@@ -3,6 +3,162 @@
 #include <windows.h>
 #include <time.h>
 
+#define PIPE_SIZE (64*1024)
+
+#if 0
+typedef struct zprocess_data {
+    HANDLE hClientRead, hClientWrite, hServerWrite, hServerRead;
+    struct handle *out, *in;
+    DWORD dwProcessId;
+    void *frontend;
+    int bufsize;
+} *Zprocess;
+
+BOOL CreateNamedPipePair(PHANDLE hReadPipe, 
+                         PHANDLE hWritePipe, 
+                         LPSECURITY_ATTRIBUTES lpPipeAttributes, 
+                         DWORD nSize);
+
+// send data to server
+static void xyz_sentdata(struct handle *h, int new_backlog)
+{
+    Zprocess console = (Zprocess)handle_get_privdata(h);
+    if (new_backlog < 0) {
+        const char *error_msg = "Error writing to console device";
+//        console_terminate(console);
+//        notify_remote_exit(console->frontend);
+        logevent(console->frontend, error_msg);
+//        connection_fatal(console->frontend, "%s", error_msg);
+    } else {
+        console->bufsize = new_backlog;
+    }
+}
+
+// 当对端有数据输出时，调用该函数来处理
+static int xyz_gotdata(struct handle *h, void *data, int len)
+{
+    Zprocess console = (Zprocess)handle_get_privdata(h);
+    if (len <= 0) {
+        const char *error_msg;
+    	/*
+    	 * Currently, len==0 should never happen because we're
+    	 * ignoring EOFs. However, it seems not totally impossible
+    	 * that this same back end might be usable to talk to named
+    	 * pipes or some other non-console device, in which case EOF
+    	 * may become meaningful here.
+    	 */
+        if (len == 0)
+            error_msg = "End of file reading from console device";
+        else
+            error_msg = "Error reading from console device";
+
+        logevent(console->frontend, error_msg);
+        return 0;
+    } else {
+        from_backend(console->frontend, 0, data, len);
+        return 0;
+    }
+}
+
+void xyz_StartSending(Terminal *term)
+{
+    Zprocess console;
+    SECURITY_ATTRIBUTES sa;
+	STARTUPINFO si;
+	PROCESS_INFORMATION pi;
+	char shellCmd[_MAX_PATH];
+    char *prgm;
+
+    // Initial Console struct
+    console = snew(struct zprocess_data);
+    console->out = console->in = NULL;
+    console->bufsize = 0;
+    console->dwProcessId = (DWORD)(-1);
+    console->frontend=term;
+    
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.lpSecurityDescriptor = NULL;
+    sa.bInheritHandle = TRUE;
+    if( !CreateNamedPipePair(&console->hClientRead, &console->hServerWrite, &sa, PIPE_SIZE) ) 
+    {
+        return "Create pipe1 failed!";
+    }
+    if( !CreateNamedPipePair(&console->hServerRead, &console->hClientWrite, &sa, PIPE_SIZE) ) 
+    {
+        return "Create pipe2 failed!";
+    }
+
+	GetStartupInfo(&si);
+	si.dwFlags = STARTF_USESHOWWINDOW|STARTF_USESTDHANDLES;
+	si.wShowWindow = SW_HIDE;
+	si.hStdOutput = console->hServerWrite;
+	si.hStdError = console->hServerWrite;
+	si.hStdInput = console->hServerRead;
+
+{
+    char params[1204];
+    const char *p;
+    char incommand[] = "d:\\puttyplus\\sz.exe";
+    char inparams[] = "-b -e -v -y E:\\temp\\INSTALL.txt";
+    
+    p = incommand + strlen(incommand);
+    while (p != incommand) {
+        if (*p == '\\' || *p == ' ') { // no space in name either
+            p++;
+            break;
+        }
+        p--;
+    }
+    sprintf(params, "%s %s", p, inparams);
+    
+    if (!CreateProcess(incommand,params,NULL, NULL,TRUE,CREATE_NEW_CONSOLE, NULL,(conf_get_filename(term->conf, CONF_zdownloaddir))->path,&si,&pi))
+//	if( !CreateProcess(NULL, shellCmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi) )
+	{
+        return;// "Create process failed!";
+	}
+    Sleep(100);
+
+    CloseHandle(pi.hThread);
+    CloseHandle(console->hServerWrite);
+    CloseHandle(console->hServerRead);
+}
+    console->dwProcessId = pi.dwProcessId;
+    
+    console->out = handle_output_new(console->hClientWrite, xyz_sentdata, console,
+				    HANDLE_FLAG_OVERLAPPED, pi.hProcess);
+    console->in = handle_input_new(console->hClientRead, xyz_gotdata, console,
+				  HANDLE_FLAG_OVERLAPPED |
+				  HANDLE_FLAG_IGNOREEOF, pi.hProcess);
+
+    term->xyz_transfering = 1;
+}
+
+void xyz_StartReceive()
+{
+}
+
+int xyz_ReceiveData(Terminal *term, const u_char *buffer, int len)
+{
+    return 0;
+}
+
+void xyz_Cancel(Terminal *term)
+{
+}
+
+//void xyz_StartSending(Terminal *term)
+//{
+//}
+
+void xyz_ReceiveInit(Terminal *term)
+{
+}
+
+int xyz_Process(Backend *back, void *backhandle, Terminal *term)
+{
+	return 0;
+}
+#else
 void xyz_updateMenuItems(Terminal *term);
 
 void xyz_ReceiveInit(Terminal *term);
@@ -120,14 +276,16 @@ static int xyz_Check(Backend *back, void *backhandle, Terminal *term, int outerr
 						if (outerr) {
 							strcat(debugbuff, "<<<<<<<\n");
 						} else {
-							strcat(debugbuff, "*******\n");
+							strcat(debugbuff, "<*<*<*<\n");
 						}
 						OutputDebugString(debugbuff);
 					}
 #endif
 					if (outerr) {
+                        // send to server
                         back->send(backhandle, buf, bread);
 					} else {
+					    // send to front(display)
 						from_backend(term, 1, buf, bread);
 					}
 					continue;
@@ -393,6 +551,7 @@ int xyz_ReceiveData(Terminal *term, const u_char *buffer, int len)
 
 	return 0 ;
 }
+#endif
 
 /*
     0  - not lszrz

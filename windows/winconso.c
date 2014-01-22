@@ -72,7 +72,7 @@ static DWORD WINAPI get_write_pipe_thread(void *param)
 	return 0;
 }
 
-static BOOL CreateNamedPipePair(PHANDLE hReadPipe, 
+BOOL CreateNamedPipePair(PHANDLE hReadPipe, 
                          PHANDLE hWritePipe, 
                          LPSECURITY_ATTRIBUTES lpPipeAttributes, 
                          DWORD nSize)
