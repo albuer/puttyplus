@@ -38,6 +38,7 @@
 #define IDC_CHK_WHOLE                   1010
 #define IDC_RADIO_FORWARD               1011
 #define IDC_RADIO_BACKWARD              1012
+#define IDA_TEXT3       1013
 
 #define IDC_STATIC                      -1
 
