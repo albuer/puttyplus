@@ -18,25 +18,23 @@ IDI_CFGICON ICON "puttycfg.ico"
 /* Accelerators used: clw */
 IDD_ABOUTBOX DIALOG DISCARDABLE 140, 40, 214, 70
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "About PuTTY"
-FONT 8, "MS Shell Dlg"
+CAPTION "关于 PuTTY"
+FONT 9, "宋体"
 BEGIN
-    DEFPUSHBUTTON "&Close", IDOK, 160, 52, 48, 14
-    PUSHBUTTON "View &Licence", IDA_LICENCE, 6, 52, 70, 14
-    PUSHBUTTON "Visit &Web Site", IDA_WEB, 84, 52, 70, 14
+    DEFPUSHBUTTON "关闭(&C)", IDOK, 160, 52, 48, 14
+    PUSHBUTTON "查看许可证(&L)", IDA_LICENCE, 6, 52, 70, 14
+    PUSHBUTTON "访问网站(&W)", IDA_WEB, 84, 52, 70, 14
     CTEXT "PuTTY", IDA_TEXT1, 10, 6, 194, 8
     CTEXT "", IDA_VERSION, 10, 16, 194, 16
-    CTEXT "\251 1997-2011 Simon Tatham. All rights reserved.",
-    	IDA_TEXT2, 10, 34, 194, 16
-    CTEXT "Email: albuer@gmail.com, cmy@rock-chips.com",
-    	IDA_TEXT3, 10, 34, 194, 16
+    CTEXT "(C) 1997-2013 Simon Tatham，保留所有权利。",
+          IDA_TEXT2, 10, 34, 194, 16
 END
 
 /* Accelerators used: aco */
 IDD_MAINBOX DIALOG DISCARDABLE 0, 0, 300, 252
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "PuTTY Configuration"
-FONT 8, "MS Shell Dlg"
+CAPTION "PuTTY 配置"
+FONT 9, "宋体"
 CLASS "PuTTYConfigBox"
 BEGIN
 END
@@ -44,21 +42,21 @@ END
 /* Accelerators used: co */
 IDD_LOGBOX DIALOG DISCARDABLE 100, 20, 300, 119
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "PuTTY Event Log"
-FONT 8, "MS Shell Dlg"
+CAPTION "PuTTY 事件日志"
+FONT 9, "宋体"
 BEGIN
-    DEFPUSHBUTTON "&Close", IDOK, 135, 102, 44, 14
-    PUSHBUTTON "C&opy", IDN_COPY, 81, 102, 44, 14
+    DEFPUSHBUTTON "关闭(&C)", IDOK, 135, 102, 44, 14
+    PUSHBUTTON "复制(&O)", IDN_COPY, 81, 102, 44, 14
     LISTBOX IDN_LIST, 3, 3, 294, 95, LBS_HASSTRINGS | LBS_USETABSTOPS | WS_VSCROLL | LBS_EXTENDEDSEL
 END
 
 /* No accelerators used */
 IDD_LICENCEBOX DIALOG DISCARDABLE 50, 50, 226, 263
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "PuTTY Licence"
-FONT 8, "MS Shell Dlg"
+CAPTION "PuTTY 许可证"
+FONT 9, "宋体"
 BEGIN
-    DEFPUSHBUTTON "OK", IDOK, 98, 243, 44, 14
+    DEFPUSHBUTTON "确定", IDOK, 98, 243, 44, 14
 
     LTEXT "Copyright \251 1997-2013 Simon Tatham", 1000, 10, 10, 206, 8
 
@@ -93,22 +91,22 @@ END
 
 IDD_FINDBOX DIALOG DISCARDABLE  140, 40, 229, 66
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Find"
-FONT 8, "MS Shell Dlg"
+CAPTION "查找"
+FONT 9, "宋体"
 BEGIN
-    DEFPUSHBUTTON   "Find",ID_BTN_FIND,170,6,50,20
-    PUSHBUTTON      "Cancel",IDOK,170,38,50,20
+    DEFPUSHBUTTON   "查找",ID_BTN_FIND,170,6,50,20
+    PUSHBUTTON      "取消",IDOK,170,38,50,20
     EDITTEXT        IDC_EDIT_FIND,6,6,154,12,ES_AUTOHSCROLL
-    CONTROL         "Case Sensitive",IDC_CHK_CASE,"Button",BS_AUTOCHECKBOX | 
+    CONTROL         "区分大小写",IDC_CHK_CASE,"Button",BS_AUTOCHECKBOX | 
                     WS_TABSTOP,10,30,75,10
-    CONTROL         "Whole Words Only",IDC_CHK_WHOLE,"Button",
+    CONTROL         "全字匹配",IDC_CHK_WHOLE,"Button",
                     BS_AUTOCHECKBOX | WS_TABSTOP,10,46,78,10
-    CONTROL         "Forward",IDC_RADIO_FORWARD,"Button",BS_AUTORADIOBUTTON,
+    CONTROL         "往前",IDC_RADIO_FORWARD,"Button",BS_AUTORADIOBUTTON,
                     105,30,44,10
-    CONTROL         "Backward",IDC_RADIO_BACKWARD,"Button",
+    CONTROL         "往后",IDC_RADIO_BACKWARD,"Button",
                     BS_AUTORADIOBUTTON,105,45,48,10
-    GROUPBOX        "Search",IDC_STATIC,100,20,60,40
-    GROUPBOX        "Options",IDC_STATIC,5,20,90,40
+    GROUPBOX        "查找方向",IDC_STATIC,100,20,60,40
+    GROUPBOX        "选项",IDC_STATIC,5,20,90,40
 END
 
 #include "version.rc2"

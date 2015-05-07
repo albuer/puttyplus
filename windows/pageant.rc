@@ -5,57 +5,57 @@
 #include "rcstuff.h"
 
 #define APPNAME "Pageant"
-#define APPDESC "PuTTY SSH authentication agent"
+#define APPDESC "PuTTY SSH 认证代理"
 
 200 ICON "pageant.ico"
 201 ICON "pageants.ico"
 
 210 DIALOG DISCARDABLE 0, 0, 140, 60
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Pageant: Enter Passphrase"
-FONT 8, "MS Shell Dlg"
+CAPTION "Pageant: 输入密码"
+FONT 9, "宋体"
 BEGIN
-    CTEXT "Enter passphrase for key", 100, 10, 6, 120, 8
+    CTEXT "请输入密钥的密码", 100, 10, 6, 120, 8
     CTEXT "", 101, 10, 16, 120, 8
     EDITTEXT 102, 10, 26, 120, 12, ES_PASSWORD | ES_AUTOHSCROLL
-    DEFPUSHBUTTON "O&K", IDOK, 20, 42, 40, 14
-    PUSHBUTTON "&Cancel", IDCANCEL, 80, 42, 40, 14
+    DEFPUSHBUTTON "确定(&K)", IDOK, 20, 42, 40, 14
+    PUSHBUTTON "取消(&C)", IDCANCEL, 80, 42, 40, 14
 END
 
 211 DIALOG DISCARDABLE 0, 0, 330, 200
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "Pageant Key List"
-FONT 8, "MS Shell Dlg"
+CAPTION "Pageant 密钥列表"
+FONT 9, "宋体"
 BEGIN
     LISTBOX 100, 10, 10, 310, 155,
         LBS_EXTENDEDSEL | LBS_HASSTRINGS | LBS_USETABSTOPS | WS_VSCROLL | WS_TABSTOP
-    PUSHBUTTON "&Add Key", 101, 75, 162, 60, 14
-    PUSHBUTTON "&Remove Key", 102, 195, 162, 60, 14
-    PUSHBUTTON "&Help", 103, 10, 182, 50, 14
-    DEFPUSHBUTTON "&Close", IDOK, 270, 182, 50, 14
+    PUSHBUTTON "增加密钥(&A)", 101, 75, 162, 60, 14
+    PUSHBUTTON "移除密钥(&R)", 102, 195, 162, 60, 14
+    PUSHBUTTON "帮助(&H)", 103, 10, 182, 50, 14
+    DEFPUSHBUTTON "关闭(&C)", IDOK, 270, 182, 50, 14
 END
 
 /* Accelerators used: cl */
 213 DIALOG DISCARDABLE 140, 40, 136, 70
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "About Pageant"
-FONT 8, "MS Shell Dlg"
+CAPTION "关于 Pageant"
+FONT 9, "宋体"
 BEGIN
-    DEFPUSHBUTTON "&Close", IDOK, 82, 52, 48, 14
-    PUSHBUTTON "View &Licence", 101, 6, 52, 70, 14
+    DEFPUSHBUTTON "关闭(&C)", IDOK, 82, 52, 48, 14
+    PUSHBUTTON "查看许可证(&L)", 101, 6, 52, 70, 14
     CTEXT "Pageant", 102, 10, 6, 120, 8
     CTEXT "", 100, 10, 16, 120, 16
-    CTEXT "\251 1997-2013 Simon Tatham. All rights reserved.",
+    CTEXT "(C) 1997-2013 Simon Tatham，保留所有权利。",
           103, 10, 34, 120, 16
 END
 
 /* No accelerators used */
 214 DIALOG DISCARDABLE 50, 50, 226, 263
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "PuTTY Licence"
-FONT 8, "MS Shell Dlg"
+CAPTION "PuTTY 许可证"
+FONT 9, "宋体"
 BEGIN
-    DEFPUSHBUTTON "OK", IDOK, 98, 243, 44, 14
+    DEFPUSHBUTTON "确定", IDOK, 98, 243, 44, 14
 
     LTEXT "Copyright \251 1997-2013 Simon Tatham", 1000, 10, 10, 206, 8
 

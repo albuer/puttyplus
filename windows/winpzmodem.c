@@ -336,7 +336,7 @@ void xyz_StartSending(Terminal *term)
 	fn.lStructSize = sizeof(fn);
 	fn.lpstrFile = filenames;
 	fn.nMaxFile = sizeof(filenames)-1; // the missing -1 was causing a crash on very long selections
-	fn.lpstrTitle = "Select files to upload...";
+	fn.lpstrTitle = "选择要发送的文件...";
 	fn.Flags = OFN_ALLOWMULTISELECT | OFN_CREATEPROMPT | OFN_ENABLESIZING | OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_PATHMUSTEXIST;
 
 	res = GetOpenFileName(&fn);

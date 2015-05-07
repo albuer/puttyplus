@@ -5,50 +5,50 @@
 #include "rcstuff.h"
 
 #define APPNAME "PuTTYgen"
-#define APPDESC "PuTTY SSH key generation utility"
+#define APPDESC "PuTTY 密钥生成工具"
 
 200 ICON "puttygen.ico"
 
 201 DIALOG DISCARDABLE 0, 0, 318, 270
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "PuTTY Key Generator"
-FONT 8, "MS Shell Dlg"
+CAPTION "PuTTY 密钥生成器"
+FONT 9, "宋体"
 BEGIN
 END
 
 210 DIALOG DISCARDABLE 0, 0, 140, 60
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "PuTTYgen: Enter Passphrase"
-FONT 8, "MS Shell Dlg"
+CAPTION "PuTTYgen: 输入密码"
+FONT 9, "宋体"
 BEGIN
-    CTEXT "Enter passphrase for key", 100, 10, 6, 120, 8
+    CTEXT "请输入密钥的密码", 100, 10, 6, 120, 8
     CTEXT "", 101, 10, 16, 120, 8
     EDITTEXT 102, 10, 26, 120, 12, ES_PASSWORD | ES_AUTOHSCROLL
-    DEFPUSHBUTTON "O&K", IDOK, 20, 42, 40, 14
-    PUSHBUTTON "&Cancel", IDCANCEL, 80, 42, 40, 14
+    DEFPUSHBUTTON "确定(&K)", IDOK, 20, 42, 40, 14
+    PUSHBUTTON "取消(&C)", IDCANCEL, 80, 42, 40, 14
 END
 
 /* Accelerators used: cl */
 213 DIALOG DISCARDABLE 140, 40, 136, 70
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "About PuTTYgen"
-FONT 8, "MS Shell Dlg"
+CAPTION "关于 PuTTYgen"
+FONT 9, "宋体"
 BEGIN
-    DEFPUSHBUTTON "&Close", IDOK, 82, 52, 48, 14
-    PUSHBUTTON "View &Licence", 101, 6, 52, 70, 14
+    DEFPUSHBUTTON "关闭(&C)", IDOK, 82, 52, 48, 14
+    PUSHBUTTON "查看许可证(&L)", 101, 6, 52, 70, 14
     CTEXT "PuTTYgen", 102, 10, 6, 120, 8
     CTEXT "", 100, 10, 16, 120, 16
-    CTEXT "\251 1997-2013 Simon Tatham. All rights reserved.",
+    CTEXT "(C) 1997-2013 Simon Tatham，保留所有权利。",
           103, 10, 34, 120, 16
 END
 
 /* No accelerators used */
 214 DIALOG DISCARDABLE 50, 50, 226, 263
 STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
-CAPTION "PuTTY Licence"
-FONT 8, "MS Shell Dlg"
+CAPTION "PuTTY 许可证"
+FONT 9, "宋体"
 BEGIN
-    DEFPUSHBUTTON "OK", IDOK, 98, 243, 44, 14
+    DEFPUSHBUTTON "确定", IDOK, 98, 243, 44, 14
 
     LTEXT "Copyright \251 1997-2013 Simon Tatham", 1000, 10, 10, 206, 8
 
