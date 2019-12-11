@@ -762,7 +762,7 @@ void load_open_settings(void *sesskey, Conf *conf)
 	if (i == FORCE_ON)
 	    default_kexes = "dh-group14-sha1,dh-group1-sha1,rsa,WARN,dh-gex-sha1";
 	else
-	    default_kexes = "dh-gex-sha1,dh-group14-sha1,dh-group1-sha1,rsa,WARN";
+	    default_kexes = "dh-group14-sha1,dh-gex-sha1,dh-group1-sha1,rsa,WARN";
 	gprefs(sesskey, "KEX", default_kexes,
 	       kexnames, KEX_MAX, conf, CONF_ssh_kexlist);
     }
