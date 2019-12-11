@@ -48,3 +48,11 @@ PuttyPlus自身不支持多标签，可通过第三方软件来实现多标签�
 ## 编译
 
 在windows系统上，使用Microsoft VS2010软件打开`puttyplus/windows/msvc2010/puttyplus/puttyplus.sln`进行编辑即可
+
+
+
+## 注意
+
+在使用SSH功能时候，默认使用的密钥验证算法是`Diffie-Hellman group exchange`，但有一些服务器已不支持该算法，现在修改默认算法为`Diffie-Hellman group 14`
+
+## 
